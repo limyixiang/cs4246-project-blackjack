@@ -176,8 +176,6 @@ class BlackjackEnv(gym.Env):
 
     def _true_count_bucket(self):
         decks_left = max(self.deck.size() / 52.0, 1e-6)
-        if decks_left < 1.0:
-            decks_left = 1.0
         tc = self.hi_lo_count / decks_left
         tc_trunc = int(np.trunc(tc))
         return self._tc_to_bucket7(tc_trunc)
