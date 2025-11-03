@@ -135,8 +135,11 @@ class BlackjackEnv(gym.Env):
     """
     def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10):
         self.num_decks = num_decks
-        self.tc_min, self.tc_max = tc_min, tc_max
-        self.tc_bucket_names = ("≤-3", "-2", "-1", "0", "+1", "+2", "≥+3")
+        # Dynamic true-count bucket configuration: integer buckets from tc_min..tc_max (inclusive)
+        self.tc_min, self.tc_max = int(tc_min), int(tc_max)
+        assert self.tc_max >= self.tc_min, "tc_max must be >= tc_min"
+        # Pretty labels: -3, -2, ..., +2, +3
+        self.tc_bucket_names = tuple(f"{v:+d}" for v in range(self.tc_min, self.tc_max + 1))
         self.bet_multipliers = np.array([1.0, 2.0, 4.0], dtype=np.float32)
         self.n_bets = len(self.bet_multipliers)
         # 2 actions in playing phase and n_bet actions in betting phase
@@ -160,25 +163,12 @@ class BlackjackEnv(gym.Env):
         self.deck.shuffle()
         self.hi_lo_count = 0
 
-
-    def _tc_to_bucket7(self, tc_int: int) -> int:
-        """
-        Map integer TC to 7 buckets:
-        0: ≤-3, 1: -2, 2: -1, 3: 0, 4: +1, 5: +2, 6: ≥+3
-        """
-        if tc_int <= -3: return 0
-        if tc_int == -2: return 1
-        if tc_int == -1: return 2
-        if tc_int == 0:  return 3
-        if tc_int == 1:  return 4
-        if tc_int == 2:  return 5
-        return 6  # tc_int >= +3
-
     def _true_count_bucket(self):
         decks_left = max(self.deck.size() / 52.0, 1e-6)
         tc = self.hi_lo_count / decks_left
-        tc_trunc = int(np.trunc(tc))
-        return self._tc_to_bucket7(tc_trunc)
+        tc_rounded = int(np.rint(tc)) # banker's rounding
+        tc_clamped = min(max(tc_rounded, self.tc_min), self.tc_max)
+        return tc_clamped - self.tc_min
 
     def update_hi_lo_count(self, card_drawn):
         rank = _rank(card_drawn)
