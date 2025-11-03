@@ -138,7 +138,7 @@ class BlackjackEnv(gym.Env):
         # Dynamic true-count bucket configuration: integer buckets from tc_min..tc_max (inclusive)
         self.tc_min, self.tc_max = int(tc_min), int(tc_max)
         assert self.tc_max >= self.tc_min, "tc_max must be >= tc_min"
-        # Pretty labels: -3, -2, ..., +2, +3
+        # Pretty labels
         self.tc_bucket_names = tuple(f"{v:+d}" for v in range(self.tc_min, self.tc_max + 1))
         self.bet_multipliers = np.array([1.0, 2.0, 4.0], dtype=np.float32)
         self.n_bets = len(self.bet_multipliers)
@@ -166,8 +166,8 @@ class BlackjackEnv(gym.Env):
     def _true_count_bucket(self):
         decks_left = max(self.deck.size() / 52.0, 1e-6)
         tc = self.hi_lo_count / decks_left
-        tc_rounded = int(np.rint(tc)) # banker's rounding
-        tc_clamped = min(max(tc_rounded, self.tc_min), self.tc_max)
+        tc_truncated = int(np.trunc(tc))
+        tc_clamped = min(max(tc_truncated, self.tc_min), self.tc_max)
         return tc_clamped - self.tc_min
 
     def update_hi_lo_count(self, card_drawn):
