@@ -191,12 +191,19 @@ class BlackjackEnv(gym.Env):
 
         # Auto-win if natural hand
         if len(self.player) == 2 and is_natural(self.player):
+            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
             terminated = True
             if is_natural(self.dealer):
                 reward = 0.0
             else:
                 reward = 1.5 if self.natural else 1.0
             assert self.observation_space.contains(self._get_obs())
+            return self._get_obs(), reward, terminated, False, {}
+        
+        if len(self.player) == 2 and is_natural(self.dealer):
+            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+            terminated = True
+            reward = -1.0
             return self._get_obs(), reward, terminated, False, {}
 
         a = int(action) % 2
@@ -241,8 +248,10 @@ class BlackjackEnv(gym.Env):
         if r in TEN_VALUE_RANKS: return 10
         return int(r)
     
-    def _get_obs(self):
+    def _get_obs(self, initial_tc_idx=None):
         player_sum, player_usable_ace = _hand_sum_and_usable_ace(self.player)
+        if initial_tc_idx:
+            return (player_sum, self._dealer_up_value(), player_usable_ace, initial_tc_idx)
         return (player_sum, self._dealer_up_value(), player_usable_ace, self._true_count_bucket())
     
     def reset(
@@ -258,15 +267,17 @@ class BlackjackEnv(gym.Env):
             self.deck.shuffle()
             self.hi_lo_count = 0  # reset count
 
+        initial_tc_idx = self._true_count_bucket()
+
         # Deal initial hand and update counts for visible cards
         self.player = self.deck.draw_hand()
         self.dealer = self.deck.draw_hand()
         self.update_hi_lo_count(self.player[0])
         self.update_hi_lo_count(self.player[1])
         self.update_hi_lo_count(self.dealer[0])
-        assert self.observation_space.contains(self._get_obs())
+        assert self.observation_space.contains(self._get_obs(initial_tc_idx=initial_tc_idx))
 
-        return self._get_obs(), {}
+        return self._get_obs(initial_tc_idx=initial_tc_idx), {}
     
 
 # Pixel art from Mariia Khmelnytska (https://www.123rf.com/photo_104453049_stock-vector-pixel-art-playing-cards-standart-deck-vector-set.html)
