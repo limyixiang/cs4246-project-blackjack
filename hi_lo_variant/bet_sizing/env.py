@@ -170,7 +170,7 @@ class BlackjackEnv(gym.Env):
         tc_clamped = min(max(tc_truncated, self.tc_min), self.tc_max)
         return tc_clamped - self.tc_min
 
-    def update_hi_lo_count(self, card_drawn):
+    def update_hi_lo_count(self, card_drawn): # common hi-low counting strategy (simplified by Harvey Dubner)
         rank = _rank(card_drawn)
         if rank in ['2', '3', '4', '5', '6']:
             self.hi_lo_count += 1
@@ -178,6 +178,15 @@ class BlackjackEnv(gym.Env):
             self.hi_lo_count -= 1
         else:
             pass # neutral
+
+    # def update_hi_lo_count(self, card_drawn): # Thorp's strategy
+    #     rank = _rank(card_drawn)
+    #     if rank in ['A', '2', '3', '4', '5', '6', '7', '8', '9']:
+    #         self.hi_lo_count += 4
+    #     elif rank in ['10', 'J', 'Q', 'K']:
+    #         self.hi_lo_count -= 9
+    #     else:
+    #         pass
 
     def get_valid_actions_idxs(self):
         return range(self.n_bets) if self.phase == 0 else (0, 1) 
@@ -257,7 +266,7 @@ class BlackjackEnv(gym.Env):
         options: dict | None = None,
     ):
         super().reset(seed=seed)
-        cut_frac = 0.2  # reshuffle when 20% of deck remains
+        cut_frac = 0.25  # reshuffle when 25% of deck remains
         # Reshuffle when low on cards
         if self.deck.size() < int(52 * self.num_decks * cut_frac):
             self.deck = Deck(self.num_decks)
