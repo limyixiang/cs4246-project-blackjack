@@ -211,6 +211,18 @@ class BlackjackEnv(gym.Env):
             return self._get_obs(), 0.0, False, False, {}
         
         # ----- Phase 1: playing phase -----
+        # Auto win if natural hand
+        if len(self.player) == 2 and is_natural(self.player):
+            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+            terminated = True
+            if is_natural(self.dealer):
+                reward = 0.0
+            else:
+                reward = 1.5 if self.natural else 1.0
+            reward *= self.current_bet
+            assert self.observation_space.contains(self._get_obs())
+            return self._get_obs(), reward, True, False, {}
+
         a = int(action) % 2
         if a == 1: # add a card to player's hand and return
             drawn_card = self.deck.draw_card()
