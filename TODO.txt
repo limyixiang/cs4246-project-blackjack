@@ -4,3 +4,6 @@
   - surrender
 2. need to determine the optimal number of train episodes for train and bet 
 3. write test files for all variants to confirm that the environment is working as expected
+4. future work could explore having more players in the game, and these players take random actions
+  - currently assume only 1 player and 1 dealer
+5. bust on hit assumes that dealer does not reveal the card, which could be the cause of the abnormal results
