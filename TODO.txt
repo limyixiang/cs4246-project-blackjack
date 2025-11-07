@@ -1,0 +1,6 @@
+1. need to add actions 
+  - split
+  - double
+  - surrender
+2. need to determine the optimal number of train episodes for train and bet 
+3. write test files for all variants to confirm that the environment is working as expected
