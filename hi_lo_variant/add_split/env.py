@@ -8,87 +8,12 @@ import numpy as np
 # Support both running as a script from this folder and importing as a package
 try:
     from deck import Deck
+    from player import SimplePlayer
+    from hand import Hand, _rank, _hard_value, ACE_RANKS, TEN_VALUE_RANKS
 except ImportError:  # pragma: no cover - fallback for package import
     from .deck import Deck
-
-ACE_RANKS = {"A"} 
-TEN_VALUE_RANKS = {"10", "J", "Q", "K"}  # ranks worth 10
-
-def _rank(card: str) -> str:
-    """Return the rank portion of a card like '10H' -> '10', 'AS' -> 'A'."""
-    return card[:-1]  # last char is suit
-
-def _hard_value(card: str) -> int:
-    """Blackjack hard value (Ace as 1)."""
-    r = _rank(card)
-    if r in ACE_RANKS:
-        return 1
-    if r in TEN_VALUE_RANKS:
-        return 10
-    return int(r)  # '2'..'9'
-
-
-class Hand:
-    """A blackjack hand abstraction wrapping a list of card strings.
-
-    Contract
-    - Cards are strings like 'AS', '10H'.
-    - Iterable, indexable, and has len() like a list.
-    - Provides helpers for totals, usable ace, bust, score, and natural.
-    """
-
-    def __init__(self, cards: list[str] | None = None):
-        self._cards: list[str] = list(cards) if cards is not None else []
-
-    # --- list-like protocol ---
-    def __iter__(self):
-        return iter(self._cards)
-
-    def __len__(self):
-        return len(self._cards)
-
-    def __getitem__(self, idx):
-        return self._cards[idx]
-
-    def add(self, card: str):
-        self._cards.append(card)
-
-    # Keep compatibility with existing code paths that call .append
-    append = add
-
-    # --- blackjack helpers ---
-    def hard_total(self) -> int:
-        """Sum with all Aces counted as 1."""
-        return sum(_hard_value(c) for c in self._cards)
-
-    def usable_ace(self) -> int:
-        """1 if an Ace can be counted as 11 without busting, else 0."""
-        s = self.hard_total()
-        has_ace = any(_rank(c) in ACE_RANKS for c in self._cards)
-        return int(has_ace and s + 10 <= 21)
-
-    def total(self) -> int:
-        """Best total for the hand (treat one Ace as 11 if usable)."""
-        s = self.hard_total()
-        return s + 10 if self.usable_ace() else s
-
-    def total_and_usable_ace(self) -> tuple[int, int]:
-        s = self.hard_total()
-        if any(_rank(c) in ACE_RANKS for c in self._cards) and s + 10 <= 21:
-            return s + 10, 1
-        return s, 0
-
-    def is_bust(self) -> bool:
-        return self.total() > 21
-
-    def score(self) -> int:
-        return 0 if self.is_bust() else self.total()
-
-    def is_natural(self) -> bool:
-        if len(self) != 2:
-            return False
-        ranks = {_rank(c) for c in self._cards}
-        return bool((ranks & ACE_RANKS) and (ranks & TEN_VALUE_RANKS))
+    from .player import SimplePlayer
+    from .hand import Hand, _rank, _hard_value, ACE_RANKS, TEN_VALUE_RANKS
 
 def cmp(a, b):
     """Returns +1 if a > b, 0 if a = b, -1 if a < b"""
@@ -102,82 +27,86 @@ class PlayActions(IntEnum):
     SPLIT = 4
 
 class BlackjackEnv(gym.Env):
-    """
-    Blackjack is a card game where the goal is to beat the dealer by obtaining cards
-    that sum to closer to 21 (without going over 21) than the dealers cards.
+    """Blackjack environment with Hi-Lo count, betting phase, and support for
+    split & double-down actions (up to 4 concurrent hands after successive splits).
 
-    ## Description
-    The game starts with the dealer having one face up and one face down card,
-    while the player has two face up cards. 
-    All cards are drawn from a finite deck, consisting of a pre-determined number of decks. 
-    The deck will be reset and shuffled when the number of cards remaining drops below a certain threshold.
+    This is an extension of the classic Sutton & Barto blackjack to include:
+    - Dynamic true count buckets (Hi-Lo system)
+    - Explicit betting phase with selectable bet multipliers
+    - Late surrender
+    - Double down
+        - Splitting (including 10-value splits; at most one Ace split, max 4 hands total). After splitting Aces,
+            HIT is disallowed on the resulting hands and DOUBLE/SURRENDER are also disabled for those hands.
 
-    The card values are:
-    - Face cards (Jack, Queen, King) have a point value of 10.
-    - Aces can either count as 11 (called a 'usable ace') or 1.
-    - Numerical cards (2-10) have a value equal to their number.
+    ## Phases
+    Two distinct phases are modelled to simplify learning different decisions:
+    1. Betting phase (phase = 0): agent selects a bet index.
+    2. Playing phase (phase = 1): agent plays one or more hands sequentially.
 
-    The player has the sum of cards held. The player can request
-    additional cards (hit) until they decide to stop (stick) or exceed 21 (bust,
-    immediate loss).
-
-    After the player sticks, the dealer reveals their facedown card, and draws cards
-    until their sum is 17 or greater. If the dealer goes bust, the player wins.
-
-    If neither the player nor the dealer busts, the outcome (win, lose, draw) is
-    decided by whose sum is closer to 21.
-
-    This environment corresponds to the version of the blackjack problem
-    described in Example 5.1 in Reinforcement Learning: An Introduction
-    by Sutton and Barto [<a href="#blackjack_ref">1</a>].
-
-    ## Action Space
-    Two phases with different valid action sets:
-    - Phase 0 (betting): choose a bet index in `bet_multipliers`.
+    ## Action Space Encoding
+    A single `Discrete(n)` where the integer meaning depends on phase:
+    - Phase 0 (betting): indices 0 .. len(bet_multipliers)-1 choose a bet.
     - Phase 1 (playing):
-        - 0: Stick (stand)
-        - 1: Hit (draw a card)
-        - 2: Surrender (late surrender; only allowed as the first decision with exactly 2 cards)
-        - 3: Double down (only allowed as the first decision with exactly 2 cards; draw exactly one card then stand)
+        - 0: STICK (stand current hand; if more hands remain, advance)
+        - 1: HIT (draw one card for current hand)
+        - 2: SURRENDER (late surrender; only first decision with exactly 2 cards on a single initial hand)
+        - 3: DOUBLE (double bet for current hand; only first decision with exactly 2 cards)
+        - 4: SPLIT (only if current hand can split: two cards of same rank or both 10-value; only before first action;
+                   limited to max 4 hands; only one Ace split permitted)
 
-    Notes:
-    - Late surrender implementation: when surrendering the dealer's hole card is revealed. If dealer has a natural blackjack the player loses the full bet; otherwise loses half the bet.
-    - `get_valid_actions_idxs()` returns the context‑appropriate subset.
+    Use `get_valid_actions_idxs()` to obtain the currently allowed subset.
 
-    ## Observation Space
-    The observation is a 5‑tuple:
-    `(player_sum, dealer_upcard_value, usable_ace, true_count_bucket, phase)`
-    where:
-    - `phase` ∈ {0 (betting), 1 (playing)}.
-    - In Phase 0 before cards are dealt: `(0, 0, 0, tc_bucket, 0)`.
+    ## Observation Space (7-tuple)
+    `(player_sum, dealer_upcard_value, usable_ace, true_count_bucket, phase, active_hand_index, total_hands)`
+    - `player_sum`: best total (with usable Ace counted as 11) for the CURRENT active hand.
+    - `dealer_upcard_value`: value of dealer's visible card (Ace reported as 1, 10-value cards as 10).
+    - `usable_ace`: 1 if current hand has an Ace usable as 11, else 0.
+    - `true_count_bucket`: index into configured Hi-Lo buckets from `tc_min..tc_max`.
+    - `phase`: 0 (betting) or 1 (playing).
+    - `active_hand_index`: which hand (0-based) is currently being acted upon.
+    - `total_hands`: total number of player hands this round (after any splits).
+    During phase 0 (before initial deal) the observation is `(0,0,0,tc_bucket,0,0,0)`.
 
-    ## Starting State
-    The starting state is initialised with the following values.
+    ## Rewards
+    Per-step rewards are incremental, not cumulative: bust penalties are given immediately; final resolution
+    adds only the remaining unresolved hand outcomes. Thus the sum of step rewards over an episode equals the
+    net outcome across all hands.
+    - Win (non-natural): +1 × hand bet
+    - Loss (non-bust resolved at dealer play): −1 × hand bet
+    - Bust: −1 × hand bet (reward given instantly on the HIT / DOUBLE step that causes bust)
+    - Draw (push): 0
+    - Natural win (only when exactly one initial hand and player natural vs dealer non-natural):
+        - +1.5 × bet if `natural=True` and not `sab`
+        - +1.0 × bet otherwise
+    - Late surrender (first decision only, two-card single hand):
+        - Dealer natural: −1 × bet
+        - Dealer non-natural: −0.5 × bet
+    - Double down: hand bet is doubled then one card drawn; outcome (win/lose/draw/bust) scored using doubled bet.
+    - Split: no immediate reward; creates a new hand with duplicated bet.
 
-    | Observation               | Values                        |
-    |---------------------------|-------------------------------|
-    | Player current sum        |  4, 5, ..., 21                |
-    | Dealer showing card value |  1, 2, ..., 10                |
-    | Usable Ace                |  0, 1                         |
-    | True Count                |  0, ..., tc_max - tc_min      |
+    ## Episode Termination Conditions
+    Episode ends when:
+    1. Betting phase completes and all hands (including split hands) are resolved (stood or bust) and dealer play (if needed) finished.
+    2. Player late surrenders (immediate termination).
+    3. Player obtains a qualifying natural blackjack on the initial (unsplit) hand (immediate resolution).
+    4. Final hand busts (and all hands are bust); dealer hole card is not revealed for counting in that case.
 
-    ## Rewards (scaled by selected bet multiplier)
-    - Win game: +1 × bet
-    - Lose game: −1 × bet
-    - Draw game: 0
-    - Natural win (player has blackjack, dealer does not):
-        - +1.5 × bet (if `natural=True` and `sab=False`)
-        - +1 × bet (otherwise / `sab=True`)
-    - Late surrender (first decision with exactly two cards, dealer not natural): −0.5 × bet
-    - Late surrender when dealer has a natural blackjack: −1 × bet
-    - Double down: outcome is resolved immediately after drawing one card; final result is multiplied by 2 × bet
+    ## Splitting Rules Implemented
+    - Allowed only before any action is taken on the current hand.
+    - Hand must consist of exactly two cards: either same rank or both 10-value ranks.
+    - Ace pair may be split only once per round (producing two hands), tracked by `ace_split_done`.
+    - After splitting Aces, each resulting hand is flagged as "no‑hit":
+        - HIT is not a valid action on those hands.
+        - Because first action is marked done, DOUBLE and SURRENDER are also not valid on those hands.
+        - STICK remains available to advance to the next hand.
+    - Each new hand receives one draw card immediately after the split.
+    - Maximum total hands: 4.
 
-    ## Episode End
-    Termination occurs when any of the following:
-    1. Player busts after a hit.
-    2. Player sticks and dealer finishes play.
-    3. Player (late) surrenders.
-    4. Player natural (auto resolution).
+    ## Notes
+    - True count bucket is computed from the Hi-Lo running count divided by decks remaining (truncated then clamped).
+    - Rewards returned at the final step do NOT repeat previously emitted bust penalties.
+    - The overlapping integer encoding of actions between phases is intentional; the environment determines legal actions based on `phase`.
+    - Training convenience: use `cumulative_episode_reward()` to read back the sum of incremental rewards for the episode.
     """
     def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10):
         self.num_decks = num_decks
@@ -195,7 +124,9 @@ class BlackjackEnv(gym.Env):
             spaces.Discrete(11),                    # dealer_upcard
             spaces.Discrete(2),                     # usable_ace
             spaces.Discrete(len(self.tc_bucket_names)),   # true-count bucket
-            spaces.Discrete(2)                      # phase: 0=betting, 1=playing
+            spaces.Discrete(2),                     # phase: 0=betting, 1=playing
+            spaces.Discrete(4),                     # current hand idx
+            spaces.Discrete(5),                     # total number of hands [0..4]
         ))
 
         # Flag to payout 1.5 on a "natural" blackjack win, like casino rules
@@ -208,6 +139,7 @@ class BlackjackEnv(gym.Env):
         self.deck = Deck(self.num_decks)
         self.deck.shuffle()
         self.hi_lo_count = 0
+        self.player = SimplePlayer()
 
     def _true_count_bucket(self):
         decks_left = max(self.deck.size() / 52.0, 1e-6)
@@ -239,9 +171,25 @@ class BlackjackEnv(gym.Env):
         if self.phase == 0:
             return range(self.n_bets)
         # Playing phase:
-        if len(self.player) == 2:
-            return (PlayActions.STICK, PlayActions.HIT, PlayActions.SURRENDER, PlayActions.DOUBLE)  # allowed only as first decision
-        return (PlayActions.STICK, PlayActions.HIT)  # stick, hit
+        actions = [PlayActions.STICK, PlayActions.HIT]
+        # If the active hand is a split-Ace-created hand, disallow HIT
+        if getattr(self.player.active_hand, "no_hit", False):
+            # remove HIT if present
+            if PlayActions.HIT in actions:
+                actions.remove(PlayActions.HIT)
+        if len(self.player.hands) == 1 and len(self.player.active_hand) == 2:
+            # First decision with exactly 2 cards: allow late surrender
+            actions += [PlayActions.SURRENDER]
+        if self.player.is_first_action() and len(self.player.active_hand) == 2:
+            # First decision with exactly 2 cards: allow double down
+            actions += [PlayActions.DOUBLE]
+        if self.player.can_split():
+            actions += [PlayActions.SPLIT]
+        return actions
+    
+    def _dealer_should_hit(self):
+        total, usable = self.dealer.total_and_usable_ace()
+        return total < 17 or (total == 17 and usable == 1)
 
     def step(self, action):
         assert self.action_space.contains(action)
@@ -253,10 +201,12 @@ class BlackjackEnv(gym.Env):
             self.current_bet = float(self.bet_multipliers[idx])
 
             # Deal initial hand and update counts for visible cards
-            self.player = Hand(self.deck.draw_hand())
-            self.dealer = Hand(self.deck.draw_hand())
-            self.update_hi_lo_count(self.player[0])
-            self.update_hi_lo_count(self.player[1])
+            player_initial_hand = self.deck.draw_hand()
+            dealer_initial_hand = self.deck.draw_hand()
+            self.player.start_new_round(player_initial_hand, self.current_bet)
+            self.dealer = dealer_initial_hand
+            self.update_hi_lo_count(self.player.active_hand[0])
+            self.update_hi_lo_count(self.player.active_hand[1])
             self.update_hi_lo_count(self.dealer[0])
 
             self.phase = 1
@@ -265,15 +215,15 @@ class BlackjackEnv(gym.Env):
             return self._get_obs(), 0.0, False, False, {}
         
         # ----- Phase 1: playing phase -----
-        # Auto win if natural hand
-        if len(self.player) == 2 and self.player.is_natural():
+        # Auto win on first hand if natural hand
+        if len(self.player.hands) == 1 and self.player.active_hand.is_natural():
             self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
             terminated = True
-            if self.dealer.is_natural():
+            if self.dealer.is_natural(): # push since both have naturals
                 reward = 0.0
             else:
                 reward = 1.5 if self.natural else 1.0
-            reward *= self.current_bet
+            reward *= self.player.active_bet
             assert self.observation_space.contains(self._get_obs())
             return self._get_obs(), reward, True, False, {}
 
@@ -281,58 +231,93 @@ class BlackjackEnv(gym.Env):
         if action == PlayActions.HIT:  # Hit: draw card
             drawn_card = self.deck.draw_card()
             self.update_hi_lo_count(drawn_card)
-            self.player.append(drawn_card)
-            if self.player.is_bust():
-                terminated = True
-                reward = -1.0 * self.current_bet
+            self.player.active_hand.append(drawn_card)
+            if self.player.active_hand.is_bust():
+                if self.player.advance_to_next_hand():
+                    # More hands to play
+                    terminated = False
+                else:
+                    # All hands played
+                    terminated = True
+                reward = -1.0 * self.player.active_bet
+                self.player.record_reward(reward) # Accumulate reward to calculate reward for splitting
             else:
                 terminated = False
                 reward = 0.0
-        elif action == PlayActions.STICK:  # Stick: resolve dealer hand
-            terminated = True
-            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
-            while self.dealer.total() < 17:
-                drawn_card = self.deck.draw_card()
-                self.update_hi_lo_count(drawn_card)
-                self.dealer.append(drawn_card)
-            reward = cmp(self.player.score(), self.dealer.score())
-            if self.sab and self.player.is_natural() and not self.dealer.is_natural():
-                # Player automatically wins. Rules consistent with S&B
-                reward = 1.0
-            elif (
-                not self.sab
-                and self.natural
-                and self.player.is_natural()
-                and reward == 1.0
-            ):
-                # Natural gives extra points, but doesn't autowin. Legacy implementation
-                reward = 1.5
-            reward *= self.current_bet
+        elif action == PlayActions.STICK:  # Stick: move to next hand or dealer play
+            reward = 0.0
+            if self.player.advance_to_next_hand():
+                # More hands to play
+                terminated = False
+            else:
+                # All hands played
+                terminated = True
         elif action == PlayActions.SURRENDER:  # Late surrender
             terminated = True
             self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
             # if dealer has blackjack: lose full bet
             if self.dealer.is_natural():
-                reward = -1.0 * self.current_bet
+                reward = -1.0 * self.player.active_bet
             else:
-                reward = -0.5 * self.current_bet
-        else: # Double down (assume only 1 player and 1 dealer)
-            terminated = True
+                reward = -0.5 * self.player.active_bet
+        elif action == PlayActions.DOUBLE: # Double down (assume only 1 player and 1 dealer)
+            self.player.apply_double_down() # doubles the bet for the active hand
             player_drawn_card = self.deck.draw_card()
             self.update_hi_lo_count(player_drawn_card)
-            # Player must receive exactly one card and then stand
-            self.player.append(player_drawn_card)
-            if self.player.is_bust():
-                # On player bust, dealer hole card is not revealed in typical rules
-                reward = -1.0 * 2 * self.current_bet
+            self.player.active_hand.append(player_drawn_card)
+            if self.player.active_hand.is_bust():
+                reward = -1.0 * self.player.active_bet
+                self.player.record_reward(reward) # Accumulate reward to calculate reward for splitting
             else:
-                # Reveal dealer hole and complete dealer play to 17+
-                self.update_hi_lo_count(self.dealer[1])  # reveal dealer's 2nd (previously unseen) card
-                while self.dealer.total() < 17:
-                    dealer_drawn_card = self.deck.draw_card()
-                    self.update_hi_lo_count(dealer_drawn_card)
-                    self.dealer.append(dealer_drawn_card)
-                reward = cmp(self.player.score(), self.dealer.score()) * 2 * self.current_bet
+                reward = 0.0 # will be resolved after dealer play
+            if self.player.advance_to_next_hand():
+                # More hands to play
+                terminated = False
+            else:
+                # All hands played; resolve dealer hand
+                terminated = True
+            # terminated = True
+            # player_drawn_card = self.deck.draw_card()
+            # self.update_hi_lo_count(player_drawn_card)
+            # # Player must receive exactly one card and then stand
+            # self.player.append(player_drawn_card)
+            # if self.player.is_bust():
+            #     # On player bust, dealer hole card is not revealed in typical rules
+            #     reward = -1.0 * 2 * self.current_bet
+            # else:
+            #     # Reveal dealer hole and complete dealer play to 17+
+            #     self.update_hi_lo_count(self.dealer[1])  # reveal dealer's 2nd (previously unseen) card
+            #     while self.dealer.total() < 17:
+            #         dealer_drawn_card = self.deck.draw_card()
+            #         self.update_hi_lo_count(dealer_drawn_card)
+            #         self.dealer.append(dealer_drawn_card)
+            #     reward = cmp(self.player.score(), self.dealer.score()) * 2 * self.current_bet
+        else: # Split
+            c1, c2 = self.player.do_split(self.deck)
+            self.update_hi_lo_count(c1)
+            self.update_hi_lo_count(c2)
+            terminated = False
+            reward = 0.0
+        
+        # Resolve dealer's hand if terminal state and not surrender
+        if terminated and action != PlayActions.SURRENDER:
+            # if player busted all his hands, dealer's hole card is not revealed in typical rules
+            if all(hand.is_bust() for hand in self.player.hands):
+                pass
+            else:
+                other_hand_rewards = 0.0
+                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+                while self._dealer_should_hit():
+                    drawn_card = self.deck.draw_card()
+                    self.update_hi_lo_count(drawn_card)
+                    self.dealer.append(drawn_card)
+                for i, hand in enumerate(self.player.hands):
+                    if hand.is_bust():
+                        continue  # already recorded loss on bust
+                    hand_reward = cmp(hand.score(), self.dealer.score())
+                    other_hand_rewards += hand_reward * self.player.hand_bets[i]
+                self.player.record_reward(other_hand_rewards) # Accumulate reward to calculate reward for splitting
+                reward += other_hand_rewards
 
         assert self.observation_space.contains(self._get_obs())
         # truncation=False as the time limit is handled by the `TimeLimit` wrapper added during `make`
@@ -347,9 +332,9 @@ class BlackjackEnv(gym.Env):
     
     def _get_obs(self):
         if self.phase == 0:
-            return (0, 0, 0, self._true_count_bucket(), 0)
-        player_sum, player_usable_ace = self.player.total_and_usable_ace()
-        return (player_sum, self._dealer_up_value(), player_usable_ace, self._true_count_bucket(), 1)
+            return (0, 0, 0, self._true_count_bucket(), 0, 0, 0)
+        player_sum, player_usable_ace = self.player.active_hand.total_and_usable_ace()
+        return (player_sum, self._dealer_up_value(), player_usable_ace, self._true_count_bucket(), 1, self.player.active_index, len(self.player.hands))
     
     def reset(
         self,
@@ -369,6 +354,14 @@ class BlackjackEnv(gym.Env):
         self.current_bet = 1.0
         assert self.observation_space.contains(self._get_obs())
         return self._get_obs(), {}
+
+    def cumulative_episode_reward(self) -> float:
+        """Return the cumulative reward accumulated by the player over the current episode.
+
+        This is a convenience helper for training loops that want the net episode
+        reward (sum of incremental rewards emitted throughout the episode).
+        """
+        return float(self.player.accumulated_reward)
     
 
 # Pixel art from Mariia Khmelnytska (https://www.123rf.com/photo_104453049_stock-vector-pixel-art-playing-cards-standart-deck-vector-set.html)

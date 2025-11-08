@@ -1,6 +1,12 @@
 import random
 from collections import deque
 
+# Support both running as a script from this folder and importing as a package
+try:
+    from hand import Hand
+except ImportError:  # pragma: no cover - fallback for package import
+    from .hand import Hand
+
 class Deck:
     def __init__(self, num_decks):
         cards = []
@@ -19,14 +25,14 @@ class Deck:
         random.shuffle(cards)
         self.deck = deque(cards)
 
-    def draw_card(self):
+    def draw_card(self) -> str:
         if not self.deck:
             raise IndexError("Deck is empty: no card to draw")
         return self.deck.popleft()
     
-    def draw_hand(self):
-        return [self.draw_card(), self.draw_card()]
+    def draw_hand(self) -> Hand:
+        return Hand([self.draw_card(), self.draw_card()])
     
-    def size(self):
+    def size(self) -> int:
         return len(self.deck)
     

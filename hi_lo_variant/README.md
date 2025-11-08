@@ -82,6 +82,20 @@ while not done:
 - If you require a different cut card (reshuffle threshold), adjust the `cut_frac` in `reset()`.
 - The included notebooks (`sarsa.ipynb`, `q-learning.ipynb`) demonstrate training with a split betting/playing policy, visualizations for both Q tables, and analysis by TC bucket.
 
+### Split / Double / Surrender variant (hi_lo_variant/add_split)
+
+The `add_split` environment extends play actions with `SPLIT`, `DOUBLE`, and `SURRENDER`, and supports multiple player hands after splits. Key rules:
+
+- Split eligibility: a hand with exactly two cards can be split if the ranks are identical or both are 10‑value ranks (10/J/Q/K).
+- Maximum hands: up to 4 hands (i.e., up to 3 splits across the round).
+- Ace split restrictions: an Ace pair may be split only once per round. After splitting Aces, each resulting hand is "no‑hit":
+  - HIT is disallowed on those hands.
+  - DOUBLE and SURRENDER are also disallowed (first action is considered done on those hands).
+  - STICK remains available to proceed to the next hand.
+- Double down: only allowed as the first decision on a two‑card hand; the hand bet is doubled and exactly one card is drawn.
+- Late surrender: only allowed as the first decision on the initial two‑card single hand; loses half the bet unless the dealer has a natural, in which case the full bet is lost.
+- Rewards are incremental per step: bust penalties are emitted immediately; final dealer resolution step adds only outcomes for unresolved hands. Use `env.cumulative_episode_reward()` if you need the episode’s net reward for your training loop.
+
 ## Compatibility
 
 - Built against Gymnasium’s Blackjack semantics and standard Python scientific stack (NumPy, Matplotlib). The environment is a plain `gymnasium.Env` and can be wrapped (e.g., `RecordEpisodeStatistics`).

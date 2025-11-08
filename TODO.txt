@@ -7,3 +7,29 @@
 4. future work could explore having more players in the game, and these players take random actions
   - currently assume only 1 player and 1 dealer
 5. bust on hit assumes that dealer does not reveal the card, which could be the cause of the abnormal results
+6. update surrender logic --- dealer hole card only revealed if he has a blackjack
+
+---
+
+current implementation
+dealer hits on soft 17 (better for the dealer --- Player EV impact -0.2%)
+double after split is allowed
+surrender after split is not allowed
+max splits is 4
+decks in a game is 4
+ace splitting: only 1 split allowed
+
+---
+split logic:
+player: [8,8] -> can split into 2 hands: [8,1] and [8,2]
+play first hand
+when first hand ends, observation of next hand is passed as observation
+if split aces [A,A] then the each hand is immediately dealt one more card and the hands should be resolved immediately
+if bust on split hand: immediately pay out
+if stick on non-busted hand: wait for dealer's hand resolution
+
+test immediate pay out vs accumulate rewards at end of episode
+
+need to check if rewards are accumulated
+  - immediate pay off if bust on split hand
+  - need to check if final rewards for the episode include the pay out from busted
