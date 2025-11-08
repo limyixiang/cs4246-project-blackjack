@@ -33,3 +33,13 @@ test immediate pay out vs accumulate rewards at end of episode
 need to check if rewards are accumulated
   - immediate pay off if bust on split hand
   - need to check if final rewards for the episode include the pay out from busted
+
+--- 
+
+test:
+1. original configuration (immediate bust, dealer does not show card)
+2. trend with additions of actions
+3. delayed bust, dealer does not show card
+4. immediate bust, dealer shows card (full information)
+5. difference between random policy
+6. vary penetration

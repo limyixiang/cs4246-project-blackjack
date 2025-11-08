@@ -1,0 +1,30 @@
+{
+  "saved_at": "2025-11-08T14:40:54.887118Z",
+  "tc_min": -10,
+  "tc_max": 10,
+  "bet_multipliers": [
+    1.0,
+    2.0,
+    4.0
+  ],
+  "natural": true,
+  "sab": false,
+  "Q_play_shape": [
+    32,
+    11,
+    2,
+    21,
+    4
+  ],
+  "Q_bet_shape": [
+    21,
+    3
+  ],
+  "action_enum": [
+    "STICK",
+    "HIT",
+    "SURRENDER",
+    "DOUBLE"
+  ],
+  "dtype": "float32"
+}

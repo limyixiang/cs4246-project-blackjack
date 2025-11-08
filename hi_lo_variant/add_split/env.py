@@ -254,11 +254,11 @@ class BlackjackEnv(gym.Env):
                 terminated = True
         elif action == PlayActions.SURRENDER:  # Late surrender
             terminated = True
-            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
             # if dealer has blackjack: lose full bet
             if self.dealer.is_natural():
+                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 reward = -1.0 * self.player.active_bet
-            else:
+            else: # dealer does not reveal his unseen card
                 reward = -0.5 * self.player.active_bet
         elif action == PlayActions.DOUBLE: # Double down (assume only 1 player and 1 dealer)
             self.player.apply_double_down() # doubles the bet for the active hand
