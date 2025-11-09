@@ -13,6 +13,9 @@ Aggregation strategy:
 from __future__ import annotations
 import argparse
 from glob import glob
+import json
+import os
+from datetime import datetime, timezone
 import numpy as np
 
 
@@ -59,6 +62,9 @@ def main():
     p = argparse.ArgumentParser(description="Aggregate worker NPZ checkpoints")
     p.add_argument('--inputs', nargs='+', help='NPZ files or glob patterns', required=True)
     p.add_argument('--out', type=str, default='merged_agent.npz', help='Output NPZ path')
+    p.add_argument('--meta-out', type=str, default=None, help='Optional JSON metadata output path')
+    p.add_argument('--variant', type=str, default=None, help='Variant/environment name (for metadata)')
+    p.add_argument('--config', type=str, default=None, help='Config id (e.g., ep_<pre>_<bet>) for metadata')
     args = p.parse_args()
 
     files: list[str] = []
@@ -70,6 +76,23 @@ def main():
     agg = aggregate(files)
     np.savez_compressed(args.out, **agg)
     print(f"Wrote merged model to {args.out} from {len(files)} shards")
+
+    if args.meta_out:
+        meta = {
+            'created_utc': datetime.now(timezone.utc).isoformat(),
+            'inputs': files,
+            'output_npz': args.out,
+            'variant': args.variant,
+            'config': args.config,
+            'qbet_shape': agg['Q_bet'].shape,
+            'qplay_shape': agg['Q_play'].shape,
+            'num_shards': len(files),
+        }
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(args.meta_out)), exist_ok=True)
+        with open(args.meta_out, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2)
+        print(f"Wrote metadata to {args.meta_out}")
 
 
 if __name__ == '__main__':

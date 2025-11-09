@@ -21,6 +21,18 @@ cd "$WORKDIR"
 source ~/cs4246-project-blackjack/.venv/bin/activate
 mkdir -p logs artifacts
 
+# Variant/environment selection (default: add_double)
+# Usage: sbatch slurm/train_test.sbatch <variant>
+# Or export VARIANT before calling sbatch.
+VARIANT="${VARIANT:-${1:-add_double}}"
+VARIANT_PATH="hi_lo_variant/${VARIANT}"
+
+if [ ! -f "${VARIANT_PATH}/sarsa.py" ]; then
+  echo "Variant '${VARIANT}' not found at '${VARIANT_PATH}/sarsa.py'." >&2
+  echo "Valid options: directories under 'hi_lo_variant/' (e.g., add_double, add_split, add_surrender, bet_sizing, original)." >&2
+  exit 1
+fi
+
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
@@ -47,11 +59,11 @@ SHARD_IDX=$(( SLURM_ARRAY_TASK_ID / N_CONFIGS ))
 PRE=${PREPLAY_EPISODES[$CONFIG_IDX]}
 BET=${BET_EPISODES[$CONFIG_IDX]}
 SEED=$((SEED_BASE + SHARD_IDX * 100 + CONFIG_IDX))
-OUTDIR="artifacts/surrender+double/ep_${PRE}_${BET}_task${SHARD_IDX}"
+OUTDIR="artifacts/${VARIANT}/ep_${PRE}_${BET}_task${SHARD_IDX}"
 mkdir -p "$OUTDIR"
-echo "[cfg ${CONFIG_IDX} / shard ${SHARD_IDX}] preplay=${PRE} bet=${BET} seed=${SEED} (configs=${N_CONFIGS} shards=${SHARDS})" | tee "$OUTDIR/run.log"
+echo "[variant=${VARIANT}] [cfg ${CONFIG_IDX} / shard ${SHARD_IDX}] preplay=${PRE} bet=${BET} seed=${SEED} (configs=${N_CONFIGS} shards=${SHARDS})" | tee "$OUTDIR/run.log"
 
-python hi_lo_variant/add_double/sarsa.py \
+python "${VARIANT_PATH}/sarsa.py" \
   --preplay-episodes ${PRE} \
   --bet-episodes ${BET} \
   --output-dir "$OUTDIR" \
