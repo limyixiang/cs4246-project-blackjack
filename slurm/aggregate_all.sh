@@ -71,8 +71,32 @@ for entry in "${CFGS[@]}"; do
   fi
 
   echo "Aggregating ${#inputs[@]} shards -> $out"
-  meta_out="${out%.npz}_meta.json"
-  python hi_lo_variant/add_split/aggregate_qtables.py --inputs "${inputs[@]}" --out "$out" --meta-out "$meta_out" --variant "${variant:-}" --config "$cfg"
+  python hi_lo_variant/add_split/aggregate_qtables.py --inputs "${inputs[@]}" --out "$out"
+
+  # Also copy a representative meta JSON alongside the merged NPZ, if available
+  meta_candidates=()
+  for f in "${inputs[@]}"; do
+    mf="${f%.npz}_meta.json"
+    [ -f "$mf" ] && meta_candidates+=("$mf")
+  done
+  if [ ${#meta_candidates[@]} -gt 0 ]; then
+    newest_meta="${meta_candidates[0]}"
+    for mf in "${meta_candidates[@]}"; do
+      if [ "$mf" -nt "$newest_meta" ]; then
+        newest_meta="$mf"
+      fi
+    done
+    meta_out="${out%.npz}_meta.json"
+    # Copy only if destination is missing or older than source
+    if [ ! -f "$meta_out" ] || [ "$newest_meta" -nt "$meta_out" ]; then
+      cp "$newest_meta" "$meta_out"
+      echo "Copied meta: $newest_meta -> $meta_out"
+    else
+      echo "Up-to-date meta: $meta_out (skipping)"
+    fi
+  else
+    echo "No meta JSON found for $display_cfg"
+  fi
 done
 
 echo "All merges written to $OUTROOT"
