@@ -13,7 +13,6 @@
 #SBATCH -e logs/%x_%A_%a.err
 
 set -euo pipefail
-module purge
 
 WORKDIR=${SLURM_SUBMIT_DIR:-$PWD}
 cd "$WORKDIR"

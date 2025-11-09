@@ -12,8 +12,6 @@
 #SBATCH -e logs/%x_%A_%a.err
 
 set -euo pipefail
-module purge
-# module load python/3.11  # adjust as needed
 
 WORKDIR=${SLURM_SUBMIT_DIR:-$PWD}
 cd "$WORKDIR"
