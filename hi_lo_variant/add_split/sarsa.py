@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
-"""Auto-generated script derived from hi_lo_variant/add_split/sarsa.ipynb."""
+"""Cluster-friendly SARSA trainer for the Hi-Lo add_split variant.
+
+Enhancements vs notebook export:
+- SLURM-aware sharding across array tasks (episodes split per task)
+- CLI flags to control episodes, seeding, metrics, plotting, output dir
+- Smaller statistics buffers; optional metrics collection (deques)
+- Faster action selection (argmax over valid indices; avoid copies)
+- Optional stage-1 checkpoint and final checkpoint with per-task suffix
+- Plotting/evaluation gated (disabled by default for clusters)
+"""
 
 # %%
 import argparse
 import os
-from collections import defaultdict, deque
+from collections import deque
 from enum import IntEnum
 from pathlib import Path
 
@@ -50,8 +59,10 @@ class BlackjackAgent:
         final_epsilon_bet: float,
         final_epsilon_play: float,
         discount_factor: float = 0.99,
-        metrics_maxlen: int | None = None,
-        collect_metrics: bool = True,
+        *,
+        collect_metrics: bool = False,
+        metrics_maxlen: int = 0,
+        seed: int | None = None,
         debug: bool = False,
     ):
         """Initialize a (two-phase) SARSA agent.
@@ -101,12 +112,60 @@ class BlackjackAgent:
         self.ucb_c = 2.0
 
         # Track learning progress
-        self.collect_metrics = collect_metrics
+        self.collect_metrics = bool(collect_metrics)
         self.training_error_bet = deque(maxlen=metrics_maxlen) if collect_metrics else None
         self.training_error_play = deque(maxlen=metrics_maxlen) if collect_metrics else None
         self.debug = debug
 
-        self.rng = np.random.default_rng()
+        self.rng = np.random.default_rng(seed)
+
+    def save(self, path: Path | str):
+        """Persist Q-tables (compressed NPZ) plus sidecar JSON metadata.
+
+        Args:
+            path: Target .npz file path (str or Path). A JSON file with meta
+                  information will be written alongside it using the pattern
+                  '<stem>_meta.json'.
+
+        Returns:
+            Path to the saved NPZ file.
+        """
+        import json, datetime
+        p = Path(path)
+        if p.suffix.lower() != '.npz':
+            # Enforce .npz extension for consistency
+            p = p.with_suffix('.npz')
+        meta_path = p.parent / f"{p.stem}_meta.json"
+
+        base_env = getattr(self.env, 'unwrapped', self.env)
+        meta = {
+            'saved_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            'variant': getattr(base_env, 'variant', None),
+            'tc_min': int(getattr(base_env, 'tc_min', 0)),
+            'tc_max': int(getattr(base_env, 'tc_max', 0)),
+            'bet_multipliers': list(getattr(base_env, 'bet_multipliers', [])),
+            'natural': bool(getattr(base_env, 'natural', False)),
+            'sab': bool(getattr(base_env, 'sab', False)),
+            'Q_play_shape': list(self.Q_play.shape),
+            'Q_bet_shape': list(self.Q_bet.shape),
+            'dtype': str(self.Q_play.dtype),
+            'lr_bet': float(self.lr_bet),
+            'lr_play': float(self.lr_play),
+            'discount_factor': float(self.discount_factor),
+            'epsilon_bet': float(self.epsilon_bet),
+            'epsilon_play': float(self.epsilon_play),
+        }
+
+        # Atomic-ish write: write to temp then replace (best-effort)
+        import tempfile, os
+        with tempfile.NamedTemporaryFile(dir=p.parent, delete=False) as tf:
+            np.savez_compressed(tf.name, Q_play=self.Q_play.astype(np.float32), Q_bet=self.Q_bet.astype(np.float32))
+            tmp_name = tf.name
+        os.replace(tmp_name, p)
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2)
+        print(f"[save] Q-tables -> {p}\n[save] meta -> {meta_path}")
+        return p
 
     # ---------- helpers ----------
     @staticmethod
@@ -260,20 +319,6 @@ class BlackjackAgent:
 from env import BlackjackEnv
 
 
-def _format_episode_count(count: int) -> str:
-    if count >= 1_000_000 and count % 1_000_000 == 0:
-        return f"{count // 1_000_000}m"
-    if count >= 1_000 and count % 1_000 == 0:
-        return f"{count // 1_000}k"
-    return str(count)
-
-
-def _resolve_plots_dir(preplay_episodes: int, bet_episodes: int) -> Path:
-    suffix = f"{_format_episode_count(preplay_episodes)}_{_format_episode_count(bet_episodes)}"
-    path = PLOTS_ROOT / suffix
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -334,9 +379,9 @@ ARRAY_TASK_ID, ARRAY_TASK_COUNT = _slurm_array_info()
 print(f"[shard] ARRAY_TASK_ID={ARRAY_TASK_ID} ARRAY_TASK_COUNT={ARRAY_TASK_COUNT}")
 
 # Training hyperparameters
-# learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
 lr_bet = 0.01
 lr_play = 0.01
+
 n_preplay_episodes_global = args.preplay_episodes
 n_bet_episodes_global = args.bet_episodes
 
@@ -352,6 +397,8 @@ print(f"[shard] preplay episodes shard={n_preplay_episodes} bet episodes shard={
 total_episodes = n_preplay_episodes + n_bet_episodes
 PLOTS_DIR = Path(args.output_dir)
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Epsilon schedules (based on local episodes for proper decay per task)
 start_epsilon_play = 1.0
 epsilon_decay_play = start_epsilon_play / max(n_preplay_episodes / 2, 1)
 final_epsilon_play = 0.1
@@ -361,9 +408,14 @@ final_epsilon_bet = 0.1
 
 # Create environment and agent
 env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True)
+if hasattr(env, 'seed'):
+    try:
+        env.seed(args.seed + ARRAY_TASK_ID)
+    except Exception:
+        pass
 tc_min, tc_max = env.tc_min, env.tc_max
 print(tc_min)
-env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=args.stats_buffer)
+env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=int(args.stats_buffer))
 
 agent = BlackjackAgent(
     env=env,
@@ -376,9 +428,10 @@ agent = BlackjackAgent(
     final_epsilon_bet=final_epsilon_bet,
     final_epsilon_play=final_epsilon_play,
     discount_factor=1.0,
-    metrics_maxlen=(None if args.metrics_maxlen <= 0 else args.metrics_maxlen),
-    collect_metrics=args.collect_metrics,
-    debug=args.debug,
+    collect_metrics=bool(args.collect_metrics),
+    metrics_maxlen=int(args.metrics_maxlen),
+    seed=int(args.seed) + int(ARRAY_TASK_ID),
+    debug=bool(args.debug),
 )
 
 # %%
@@ -600,7 +653,7 @@ def evaluate_bankroll(agent, env, episodes=200_000, rng=None):
     return summary
 
 if not args.no_plots:
-    results = evaluate_bankroll(agent, env, episodes=args.eval_episodes)
+    results = evaluate_bankroll(agent, env, episodes=int(args.eval_episodes))
     print(results)
 
 # %%
@@ -985,7 +1038,7 @@ class LoadedAgent:
         self.env = env
         self.Q_play = Q_play
         self.Q_bet = Q_bet
-        self.rng = np.random.default_rng()
+        self.rng = np.random.default_rng(args.seed + ARRAY_TASK_ID)
     def greedy_bet(self, obs):
         tc = int(obs[3]); q = self.Q_bet[tc]
         m = q.max(); idxs = np.flatnonzero(q == m)
@@ -1002,6 +1055,6 @@ class LoadedAgent:
         return int(self.rng.choice(idxs))
 
 loaded_agent = LoadedAgent(env, Q_play, Q_bet)
-summary = evaluate_bankroll(loaded_agent, env, episodes=1_000_000)
+summary = evaluate_bankroll(loaded_agent, env, episodes=int(args.eval_episodes))
 print(summary)
 
