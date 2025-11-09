@@ -97,6 +97,58 @@ class BlackjackAgent:
 
         self.rng = np.random.default_rng()
 
+    def save(self, path: Path | str):
+        """Persist Q tables (Q_play, Q_bet) plus visit counts to compressed NPZ with atomic replace."""
+        import json, datetime, tempfile, os, numpy as np
+        p = Path(path)
+        if p.suffix.lower() != '.npz':
+            p = p.with_suffix('.npz')
+        meta_path = p.parent / f"{p.stem}_meta.json"
+        base_env = getattr(self.env, 'unwrapped', self.env)
+        bet_mult = getattr(base_env, 'bet_multipliers', [])
+        try:
+            bet_mult_list = [float(x) for x in list(bet_mult)]
+        except Exception:
+            bet_mult_list = []
+        meta = {
+            'saved_at': datetime.datetime.now(datetime.UTC).isoformat(),
+            'tc_min': int(getattr(base_env, 'tc_min', 0)),
+            'tc_max': int(getattr(base_env, 'tc_max', 0)),
+            'bet_multipliers': bet_mult_list,
+            'Q_play_shape': list(self.Q_play.shape),
+            'Q_bet_shape': list(self.Q_bet.shape),
+            'lr_bet': float(self.lr_bet),
+            'lr_play': float(self.lr_play),
+            'discount_factor': float(self.discount_factor),
+            'epsilon_bet': float(self.epsilon_bet),
+            'epsilon_play': float(self.epsilon_play),
+        }
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=p.parent, suffix='.npz')
+        os.close(fd)
+        try:
+            with open(tmp_name, 'wb') as f:
+                np.savez_compressed(
+                    f,
+                    Q_play=self.Q_play.astype(np.float32),
+                    Q_bet=self.Q_bet.astype(np.float32),
+                    N_bet=self.N_bet.astype(np.int64),
+                    N_tc=self.N_tc.astype(np.int64),
+                )
+                try:
+                    f.flush(); os.fsync(f.fileno())
+                except Exception:
+                    pass
+            os.replace(tmp_name, p)
+        finally:
+            if os.path.exists(tmp_name) and not os.path.samefile(tmp_name, p):
+                try: os.remove(tmp_name)
+                except Exception: pass
+        with open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, indent=2)
+        print(f"[save] Q-tables -> {p}\n[save] meta -> {meta_path}")
+        return p
+
     # ---------- helpers ----------
     @staticmethod
     def _unpack(obs):

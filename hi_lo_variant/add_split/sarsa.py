@@ -163,12 +163,33 @@ class BlackjackAgent:
             'epsilon_play': float(self.epsilon_play),
         }
 
-        # Atomic-ish write: write to temp then replace (best-effort)
+        # Robust atomic write on Windows: write to a closed temp file, flush+fsync, then replace
         import tempfile, os
-        with tempfile.NamedTemporaryFile(dir=p.parent, delete=False) as tf:
-            np.savez_compressed(tf.name, Q_play=self.Q_play.astype(np.float32), Q_bet=self.Q_bet.astype(np.float32))
-            tmp_name = tf.name
-        os.replace(tmp_name, p)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=p.parent, suffix='.npz')
+        os.close(fd)  # ensure it's closed so numpy can open it for writing on Windows
+        try:
+            with open(tmp_name, 'wb') as f:
+                np.savez_compressed(
+                    f,
+                    Q_play=self.Q_play.astype(np.float32),
+                    Q_bet=self.Q_bet.astype(np.float32),
+                    N_bet=self.N_bet.astype(np.int64),
+                    N_tc=self.N_tc.astype(np.int64),
+                )
+                try:
+                    f.flush(); os.fsync(f.fileno())
+                except Exception:
+                    # fsync may not be available on some filesystems; ignore
+                    pass
+            os.replace(tmp_name, p)
+        finally:
+            # If something went wrong before replace, best effort cleanup
+            if os.path.exists(tmp_name) and not os.path.samefile(tmp_name, p):
+                try:
+                    os.remove(tmp_name)
+                except Exception:
+                    pass
         with open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(meta, f, indent=2)
         print(f"[save] Q-tables -> {p}\n[save] meta -> {meta_path}")
