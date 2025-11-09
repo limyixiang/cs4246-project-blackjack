@@ -21,8 +21,8 @@ mkdir -p logs artifacts
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
-PREPLAY_EPISODES=(5e7 1e8 5e8)
-BET_EPISODES=(5e7 5e7 5e7)
+PREPLAY_EPISODES=(50_000_000 100_000_000 500_000_000)
+BET_EPISODES=(50_000_000 50_000_000 50_000_000)
 
 if [ ${#PREPLAY_EPISODES[@]} -ne ${#BET_EPISODES[@]} ]; then
   echo "Config error: PREPLAY_EPISODES and BET_EPISODES length mismatch" >&2
