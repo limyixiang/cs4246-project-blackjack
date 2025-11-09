@@ -1,8 +1,7 @@
 #!/bin/bash
 # Parallelize across both shards and episode configurations by flattening the array.
 # Example: with 3 configs and 8 shards, set --array=0-23 (3*8-1).
-#SBATCH -J sarsa2d
-#SBATCH -A yixiang
+#SBATCH -J sarsa
 #SBATCH -p long
 #SBATCH -t 24:00:00
 #SBATCH --nodes=1

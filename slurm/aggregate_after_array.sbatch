@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH -J sarsa-aggregate
-#SBATCH -A yixiang
 #SBATCH -p normal
 #SBATCH -t 01:00:00
 #SBATCH --nodes=1
