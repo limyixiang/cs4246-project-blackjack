@@ -997,55 +997,33 @@ except Exception as e:
 plot_q_bet_heatmap(agent, env, annotate=False)
 
 # %%
-# === Persist trained Q-tables ===
-import numpy as np, json, datetime
-
-SAVE_PATH = 'blackjack_agent_qtables.npz'
-META_PATH = 'blackjack_agent_meta.json'
-
-base_env = getattr(env, 'unwrapped', env)
-meta = {
-    'saved_at': datetime.datetime.now(datetime.UTC).isoformat(),
-    'tc_min': int(base_env.tc_min),
-    'tc_max': int(base_env.tc_max),
-    'bet_multipliers': [float(x) for x in base_env.bet_multipliers.tolist()],
-    'natural': bool(getattr(base_env, 'natural', False)),
-    'sab': bool(getattr(base_env, 'sab', False)),
-    'Q_play_shape': list(agent.Q_play.shape),
-    'Q_bet_shape': list(agent.Q_bet.shape),
-    'action_enum': [a.name for a in Action],
-    'dtype': str(agent.Q_play.dtype),
-}
-
-# Use compressed npz for portability
-np.savez_compressed(
-    SAVE_PATH,
-    Q_play=agent.Q_play.astype(np.float32),  # ensure stable dtype
-    Q_bet=agent.Q_bet.astype(np.float32),
-)
-with open(META_PATH, 'w', encoding='utf-8') as f:
-    json.dump(meta, f, indent=2)
-
-print(f'Saved Q tables to {SAVE_PATH} and meta to {META_PATH}')
-print('Meta summary:')
-print(json.dumps(meta, indent=2))
-
-# %%
-# === Load Q-tables and evaluate without training ===
+# === (Re)Load final checkpoint and evaluate without retraining ===
 import numpy as np, json
 
-LOAD_PATH = 'blackjack_agent_qtables.npz'
-META_PATH = 'blackjack_agent_meta.json'
+SAVE_PATH = final_ckpt  # use per-task unique final checkpoint
+META_PATH = SAVE_PATH.parent / f"{SAVE_PATH.stem}_meta.json"
 
-with np.load(LOAD_PATH) as data:
-    Q_play = data['Q_play']
-    Q_bet = data['Q_bet']
-
-with open(META_PATH, 'r', encoding='utf-8') as f:
-    meta = json.load(f)
-
-print('Loaded:', LOAD_PATH)
-print('Meta:', {k: meta[k] for k in ['tc_min','tc_max','bet_multipliers','Q_play_shape','Q_bet_shape']})
+try:
+    with np.load(SAVE_PATH) as data:
+        Q_play = data['Q_play']
+        Q_bet = data['Q_bet']
+    if META_PATH.exists():
+        with open(META_PATH, 'r', encoding='utf-8') as f:
+            meta = json.load(f)
+    else:
+        meta = {
+            'tc_min': int(getattr(env.unwrapped, 'tc_min', 0)),
+            'tc_max': int(getattr(env.unwrapped, 'tc_max', 0)),
+            'bet_multipliers': [float(x) for x in getattr(env.unwrapped, 'bet_multipliers', [])],
+            'Q_play_shape': list(Q_play.shape),
+            'Q_bet_shape': list(Q_bet.shape),
+        }
+    print('Loaded:', SAVE_PATH)
+    print('Meta:', {k: meta.get(k) for k in ['tc_min','tc_max','bet_multipliers','Q_play_shape','Q_bet_shape']})
+except Exception as e:
+    print(f"[warn] Failed to load checkpoint {SAVE_PATH}: {e}. Using in-memory agent tables.")
+    Q_play = agent.Q_play.copy()
+    Q_bet = agent.Q_bet.copy()
 
 # Build a lightweight agent facade reusing the same BlackjackAgent API for evaluation
 class LoadedAgent:
