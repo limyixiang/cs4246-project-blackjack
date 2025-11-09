@@ -1,3 +1,6 @@
 .venv
 playground.ipynb
 __pycache__/
+logs/
+artifacts
+1 

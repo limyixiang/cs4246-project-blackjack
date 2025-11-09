@@ -36,8 +36,8 @@ fi
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
-PREPLAY_EPISODES=(100_000 200_000 500_000)
-BET_EPISODES=(500_000 500_000 500_000)
+PREPLAY_EPISODES=(50_000_000 100_000_000 500_000_000)
+BET_EPISODES=(50_000_000 50_000_000 50_000_000)
 
 if [ ${#PREPLAY_EPISODES[@]} -ne ${#BET_EPISODES[@]} ]; then
   echo "Config error: PREPLAY_EPISODES and BET_EPISODES length mismatch" >&2
