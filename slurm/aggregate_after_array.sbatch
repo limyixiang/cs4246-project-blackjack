@@ -15,6 +15,7 @@ set -euo pipefail
 
 WORKDIR=${SLURM_SUBMIT_DIR:-$PWD}
 cd "$WORKDIR"
+source ~/cs4246-project-blackjack/.venv/bin/activate
 mkdir -p logs artifacts_merged
 
 # Optionally pass custom roots as args when submitting
