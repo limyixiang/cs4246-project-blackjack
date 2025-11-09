@@ -771,7 +771,15 @@ for idx in range(n_buckets):
 
 bet_df = pd.DataFrame(rows).sort_values('TC_idx').reset_index(drop=True)
 if not args.no_plots:
-    display(bet_df)
+    # Display the DataFrame when running in notebooks; fall back to printing head otherwise
+    try:
+        from IPython.display import display as _display  # type: ignore
+        _display(bet_df)
+    except Exception:
+        try:
+            print(bet_df.head().to_string(index=False))
+        except Exception:
+            pass
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.bar(bet_df['TC'], bet_df['bet_multiplier'], color='tab:green', edgecolor='k')
     ax.set_xlabel('True Count')

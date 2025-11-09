@@ -627,7 +627,14 @@ for idx in range(n_buckets):
     })
 
 bet_df = pd.DataFrame(rows).sort_values('TC_idx').reset_index(drop=True)
-display(bet_df)
+try:
+    from IPython.display import display as _display  # type: ignore
+    _display(bet_df)
+except Exception:
+    try:
+        print(bet_df.head().to_string(index=False))
+    except Exception:
+        pass
 
 # Bar chart of chosen multiplier vs TC (optionally filter low-visit buckets)
 min_visits = 0  # set to e.g. 1000 to hide low-data bins
