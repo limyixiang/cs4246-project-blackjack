@@ -15,8 +15,6 @@
 cd ~/cs4246-project-blackjack || exit 1
 source ~/cs4246-project-blackjack/.venv/bin/activate
 
-rm -rf *.log
-
 srun -u python hi_lo_variant/add_split/sarsa.py \
   --preplay-episodes 100_000_000 \
   --bet-episodes 100_000_000 \
