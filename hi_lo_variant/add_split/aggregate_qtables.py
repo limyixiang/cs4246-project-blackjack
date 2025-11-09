@@ -23,8 +23,13 @@ def aggregate(files: list[str]) -> dict[str, np.ndarray]:
     wbet_cnt = None
     qplay_sum = None
     qplay_cnt = 0
+    valid = 0
     for f in files:
-        z = np.load(f, allow_pickle=False)
+        try:
+            z = np.load(f, allow_pickle=False)
+        except Exception as e:
+            print(f"[warn] Skipping unreadable NPZ '{f}': {e}")
+            continue
         Q_bet = z['Q_bet']
         N_bet = z['N_bet'] if 'N_bet' in z.files else np.ones_like(Q_bet, dtype=np.int64)
         Q_play = z['Q_play']
@@ -37,6 +42,10 @@ def aggregate(files: list[str]) -> dict[str, np.ndarray]:
             qplay_sum = np.zeros_like(Q_play, dtype=np.float64)
         qplay_sum += Q_play
         qplay_cnt += 1
+        valid += 1
+
+    if valid == 0:
+        raise ValueError("No valid NPZ files to aggregate after skipping unreadable inputs")
 
     Q_bet_agg = np.divide(wbet_sum, np.maximum(wbet_cnt, 1), where=(wbet_cnt>0))
     Q_play_agg = qplay_sum / max(qplay_cnt, 1)

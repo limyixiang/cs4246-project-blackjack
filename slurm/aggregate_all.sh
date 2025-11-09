@@ -9,16 +9,22 @@ OUTROOT=${2:-artifacts_merged}
 mkdir -p "$OUTROOT"
 
 shopt -s nullglob
-declare -A SEEN
-for dir in "$ROOT"/ep_*; do
-  # Expect directory names like ep_<pre>_<bet>_task<id>
-  base=$(basename "$dir")
-  # Strip task suffix to get ep_<pre>_<bet>
-  cfg=${base%%_task*}
-  SEEN["$cfg"]=1
-done
 
-for cfg in "${!SEEN[@]}"; do
+# Build unique list of cfg prefixes (ep_<pre>_<bet>) without using associative arrays (for older bash)
+mapfile -t CFGS < <(
+  for dir in "$ROOT"/ep_*; do
+    [ -d "$dir" ] || continue
+    base=$(basename "$dir")
+    echo "${base%%_task*}"
+  done | sort -u
+)
+
+if [ ${#CFGS[@]} -eq 0 ]; then
+  echo "No configs found under $ROOT (expected ep_* directories). Nothing to aggregate."
+  exit 0
+fi
+
+for cfg in "${CFGS[@]}"; do
   pattern="$ROOT/${cfg}_task*/checkpoint_final_task*.npz"
   out="$OUTROOT/${cfg}_merged.npz"
 
