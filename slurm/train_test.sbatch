@@ -1,14 +1,14 @@
 #!/bin/bash
 # Parallelize across both shards and episode configurations by flattening the array.
-# Example: with 3 configs and 8 shards, set --array=0-23 (3*8-1).
+# Example: with 2 configs and 8 shards, set --array=0-23 (3*8-1).
 #SBATCH -J sarsa
-#SBATCH -p long
-#SBATCH -t 24:00:00
+#SBATCH -p normal
+#SBATCH -t 1:00:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=2G
-#SBATCH --array=0-23
+#SBATCH --array=0-15
 #SBATCH -o logs/%x_%A_%a.out
 #SBATCH -e logs/%x_%A_%a.err
 #SBATCH --mail-type=BEGIN,END,FAIL
@@ -24,8 +24,8 @@ mkdir -p logs artifacts
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
-PREPLAY_EPISODES=(100_000 200_000 500_000)
-BET_EPISODES=(500_000 500_000 500_000)
+PREPLAY_EPISODES=(100_000 200_000)
+BET_EPISODES=(100_000 100_000)
 
 if [ ${#PREPLAY_EPISODES[@]} -ne ${#BET_EPISODES[@]} ]; then
   echo "Config error: PREPLAY_EPISODES and BET_EPISODES length mismatch" >&2
@@ -47,21 +47,23 @@ SHARD_IDX=$(( SLURM_ARRAY_TASK_ID / N_CONFIGS ))
 PRE=${PREPLAY_EPISODES[$CONFIG_IDX]}
 BET=${BET_EPISODES[$CONFIG_IDX]}
 SEED=$((SEED_BASE + SHARD_IDX * 100 + CONFIG_IDX))
-OUTDIR="artifacts/ep_${PRE}_${BET}_task${SHARD_IDX}"
+OUTDIR="artifacts/surrender+double/ep_${PRE}_${BET}_task${SHARD_IDX}"
 mkdir -p "$OUTDIR"
 echo "[cfg ${CONFIG_IDX} / shard ${SHARD_IDX}] preplay=${PRE} bet=${BET} seed=${SEED} (configs=${N_CONFIGS} shards=${SHARDS})" | tee "$OUTDIR/run.log"
 
-python hi_lo_variant/add_split/sarsa.py \
+python hi_lo_variant/add_double/sarsa.py \
   --preplay-episodes ${PRE} \
   --bet-episodes ${BET} \
   --output-dir "$OUTDIR" \
-  --stats-buffer 200000 \
+  --stats-buffer 10000 \
   --save-stage1 \
   --save-prefix checkpoint \
   --collect-metrics \
-  --metrics-maxlen 50000 \
+  --metrics-maxlen 1000 \
   --seed ${SEED} \
   --array-task-id ${SHARD_IDX} \
   --array-task-count ${SHARDS} \
+  --eval-episodes 50000 \
+  --eval-tc-episodes 50000
 
 echo "Done cfg ${CONFIG_IDX} shard ${SHARD_IDX}"
