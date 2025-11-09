@@ -395,7 +395,7 @@ hist_start_bet = np.zeros(n_buckets, dtype=np.int64)
 # We treat SPLIT as a special action: its reward is the total accumulated
 # reward from the split decision until the episode ends.
 base_bet_action = 0 # fixed multiplier 1.0x
-for episode in tqdm(range(n_preplay_episodes), desc="Train Q_play", disable=tqdm_disable):
+for episode in tqdm(range(n_preplay_episodes), mininterval=5.0, desc="Train Q_play", disable=tqdm_disable):
     # ----- Phase 0: fixed bet -----
     s0, _ = env.reset()
     tc_idx = s0[3]                     # integer in [0, n_buckets-1]

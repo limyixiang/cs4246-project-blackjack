@@ -8,9 +8,11 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=8G
-#SBATCH --array=0-23
+#SBATCH --array=0-20
 #SBATCH -o logs/%x_%A_%a.out
 #SBATCH -e logs/%x_%A_%a.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=e1121685@u.nus.edu
 
 set -euo pipefail
 
@@ -52,7 +54,6 @@ python hi_lo_variant/add_split/sarsa.py \
   --preplay-episodes ${PRE} \
   --bet-episodes ${BET} \
   --output-dir "$OUTDIR" \
-  --disable-tqdm \
   --stats-buffer 200000 \
   --save-stage1 \
   --save-prefix checkpoint \
@@ -61,6 +62,5 @@ python hi_lo_variant/add_split/sarsa.py \
   --seed ${SEED} \
   --array-task-id ${SHARD_IDX} \
   --array-task-count ${SHARDS} \
-  --no-plots
 
 echo "Done cfg ${CONFIG_IDX} shard ${SHARD_IDX}"

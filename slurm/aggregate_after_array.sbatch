@@ -8,6 +8,8 @@
 #SBATCH --mem=2G
 #SBATCH -o logs/%x_%A.out
 #SBATCH -e logs/%x_%A.err
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=e1121685@u.nus.edu
 
 set -euo pipefail
 
