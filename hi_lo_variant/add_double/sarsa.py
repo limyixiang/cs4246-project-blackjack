@@ -137,12 +137,18 @@ class BlackjackAgent:
         meta_path = p.parent / f"{p.stem}_meta.json"
 
         base_env = getattr(self.env, 'unwrapped', self.env)
+        # Ensure JSON-serializable bet multipliers
+        bet_mult = getattr(base_env, 'bet_multipliers', [])
+        try:
+            bet_mult_list = [float(x) for x in list(bet_mult)]
+        except Exception:
+            bet_mult_list = []
         meta = {
-            'saved_at': datetime.datetime.utcnow().isoformat() + 'Z',
+            'saved_at': datetime.datetime.now(datetime.UTC).isoformat(),
             'variant': getattr(base_env, 'variant', None),
             'tc_min': int(getattr(base_env, 'tc_min', 0)),
             'tc_max': int(getattr(base_env, 'tc_max', 0)),
-            'bet_multipliers': list(getattr(base_env, 'bet_multipliers', [])),
+            'bet_multipliers': bet_mult_list,
             'natural': bool(getattr(base_env, 'natural', False)),
             'sab': bool(getattr(base_env, 'sab', False)),
             'Q_play_shape': list(self.Q_play.shape),
@@ -962,10 +968,10 @@ META_PATH = 'blackjack_agent_meta.json'
 
 base_env = getattr(env, 'unwrapped', env)
 meta = {
-    'saved_at': datetime.datetime.utcnow().isoformat() + 'Z',
+    'saved_at': datetime.datetime.now(datetime.UTC).isoformat(),
     'tc_min': int(base_env.tc_min),
     'tc_max': int(base_env.tc_max),
-    'bet_multipliers': base_env.bet_multipliers.tolist(),
+    'bet_multipliers': [float(x) for x in base_env.bet_multipliers.tolist()],
     'natural': bool(getattr(base_env, 'natural', False)),
     'sab': bool(getattr(base_env, 'sab', False)),
     'Q_play_shape': list(agent.Q_play.shape),

@@ -810,10 +810,10 @@ META_PATH = 'blackjack_agent_meta.json'
 
 base_env = getattr(env, 'unwrapped', env)
 meta = {
-    'saved_at': datetime.datetime.utcnow().isoformat() + 'Z',
+    'saved_at': datetime.datetime.now(datetime.UTC).isoformat(),
     'tc_min': int(base_env.tc_min),
     'tc_max': int(base_env.tc_max),
-    'bet_multipliers': base_env.bet_multipliers.tolist(),
+    'bet_multipliers': [float(x) for x in base_env.bet_multipliers.tolist()],
     'natural': bool(getattr(base_env, 'natural', False)),
     'sab': bool(getattr(base_env, 'sab', False)),
     'Q_play_shape': list(agent.Q_play.shape),
