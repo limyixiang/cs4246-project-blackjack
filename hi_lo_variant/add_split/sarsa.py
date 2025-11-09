@@ -531,7 +531,7 @@ if args.save_stage1:
     agent.save(PLOTS_DIR / f"{args.save_prefix}_stage1_task{ARRAY_TASK_ID}.npz")
 
 # ----- Stage 2: Learn the betting policy using the trained Q_play ----- #
-for episode in tqdm(range(n_bet_episodes), desc="Train Q_bet", disable=tqdm_disable):
+for episode in tqdm(range(n_bet_episodes), mininterval=5.0, desc="Train Q_bet", disable=tqdm_disable):
     # Phase 0: choose bet
     s0, _ = env.reset()
     tc_idx = s0[3]
