@@ -3,7 +3,8 @@
 
 # %%
 import argparse
-from collections import defaultdict
+import os
+from collections import defaultdict, deque
 from enum import IntEnum
 from pathlib import Path
 
@@ -49,6 +50,9 @@ class BlackjackAgent:
         final_epsilon_bet: float,
         final_epsilon_play: float,
         discount_factor: float = 0.99,
+        metrics_maxlen: int | None = None,
+        collect_metrics: bool = True,
+        debug: bool = False,
     ):
         """Initialize a (two-phase) SARSA agent.
 
@@ -97,8 +101,10 @@ class BlackjackAgent:
         self.ucb_c = 2.0
 
         # Track learning progress
-        self.training_error_bet = []
-        self.training_error_play = []
+        self.collect_metrics = collect_metrics
+        self.training_error_bet = deque(maxlen=metrics_maxlen) if collect_metrics else None
+        self.training_error_play = deque(maxlen=metrics_maxlen) if collect_metrics else None
+        self.debug = debug
 
         self.rng = np.random.default_rng()
 
@@ -123,7 +129,8 @@ class BlackjackAgent:
     # ---------- ε-greedy policies ----------
     def select_bet(self, obs):
         # obs phase must be 0
-        assert self.base.phase == 0
+        if self.debug:
+            assert self.base.phase == 0
         tc_idx = int(obs[3])
         q = self.Q_bet[tc_idx]
         valid_bet_idx = self.get_valid_action_idx()
@@ -136,7 +143,8 @@ class BlackjackAgent:
 
     def select_play(self, obs):
         # obs phase must be 1
-        assert self.base.phase == 1
+        if self.debug:
+            assert self.base.phase == 1
         if self._must_stick(obs):
             return Action.STICK
         ps, dv, ua, tc = self._idxs_play(obs)
@@ -146,14 +154,15 @@ class BlackjackAgent:
         assert Action.STICK in valid_play_idx
         if self.rng.random() < self.epsilon_play:
             return int(self.rng.choice(valid_play_idx))   # sample among valid actions
-        # Mask invalid actions by -inf to avoid selecting them
-        q_masked = q.copy().astype(np.float64)
-        all_actions = list(range(len(Action)))
-        for a in all_actions:
-            if a not in valid_play_idx:
-                q_masked[a] = -np.inf
-        m = np.max(q_masked); idxs = np.flatnonzero(q_masked == m)
-        return int(self.rng.choice(idxs))
+        # Fast argmax over valid actions only (no copy/masking)
+        best = None; best_val = -1e300; ties = []
+        for a in valid_play_idx:
+            qa = q[a]
+            if best is None or qa > best_val + 1e-12:
+                best_val = qa; best = a; ties = [a]
+            elif abs(qa - best_val) <= 1e-12:
+                ties.append(a)
+        return int(self.rng.choice(ties))
     
     # --------- UCB for betting ---------
     def select_bet_ucb(self, obs):
@@ -193,7 +202,8 @@ class BlackjackAgent:
         target = r0 + self.discount_factor * self.Q_play[self._idxs_play(s1)][a1_play]
         td = target - qsa
         self.Q_bet[tc0, a_bet] += self.lr_bet * td
-        self.training_error_bet.append(td)
+        if self.collect_metrics:
+            self.training_error_bet.append(float(td))
 
     def update_bet_mc(self, s0, a_bet, G):
         # Monte-Carlo kick at episode end with full return
@@ -201,7 +211,8 @@ class BlackjackAgent:
         qsa = self.Q_bet[tc0, a_bet]
         td = G - qsa
         self.Q_bet[tc0, a_bet] += self.lr_bet * td
-        self.training_error_bet.append(td)
+        if self.collect_metrics:
+            self.training_error_bet.append(float(td))
 
     def update_play_sarsa(self, s, a, r, done, s_next=None, a_next=None):
         ps, dv, ua, tc = self._idxs_play(s)
@@ -213,7 +224,8 @@ class BlackjackAgent:
             target = r + self.discount_factor * self.Q_play[ps2, dv2, ua2, tc2, a_next]
         td = target - qsa
         self.Q_play[ps, dv, ua, tc, a] += self.lr_play * td
-        self.training_error_play.append(td)
+        if self.collect_metrics:
+            self.training_error_play.append(float(td))
 
     # ---------- epsilon schedule ----------
     def decay_epsilon_bet(self):
@@ -234,12 +246,15 @@ class BlackjackAgent:
         ps, dv, ua, tc = self._idxs_play(obs)
         q = self.Q_play[ps, dv, ua, tc]
         valid_play_idx = tuple(self.get_valid_action_idx())
-        q_masked = q.copy().astype(np.float64)
-        for a in range(len(Action)):
-            if a not in valid_play_idx:
-                q_masked[a] = -np.inf
-        m = np.max(q_masked); idxs = np.flatnonzero(q_masked == m)
-        return int(self.rng.choice(idxs))
+        best = None; best_val = -1e300
+        ties = []
+        for a in valid_play_idx:
+            qa = q[a]
+            if best is None or qa > best_val + 1e-12:
+                best_val = qa; best = a; ties = [a]
+            elif abs(qa - best_val) <= 1e-12:
+                ties.append(a)
+        return int(self.rng.choice(ties))
 
 # %%
 from env import BlackjackEnv
@@ -276,31 +291,79 @@ def parse_args() -> argparse.Namespace:
         default=15_000_000,
         help="Number of episodes to train the betting policy after the playing policy stage.",
     )
+    parser.add_argument("--stats-buffer", type=int, default=200_000,
+                        help="Buffer length for RecordEpisodeStatistics (smaller reduces memory).")
+    parser.add_argument("--metrics-maxlen", type=int, default=50_000,
+                        help="Max length of training error deques (None disables bounding).")
+    parser.add_argument("--collect-metrics", action="store_true", help="Enable collection of training error metrics.")
+    parser.add_argument("--no-plots", action="store_true", help="Skip all plotting & heavy evaluation (cluster speed).")
+    parser.add_argument("--eval-episodes", type=int, default=1_000_000, help="Episodes for bankroll evaluation (only if not --no-plots).")
+    parser.add_argument("--eval-tc-episodes", type=int, default=1_000_000, help="Episodes for TC bucket evaluation (only if not --no-plots).")
+    parser.add_argument("--seed", type=int, default=12345, help="Base RNG seed.")
+    parser.add_argument("--output-dir", type=str, default=str(PLOTS_ROOT), help="Directory to write plots & checkpoints.")
+    parser.add_argument("--save-stage1", action="store_true", help="Save checkpoint after preplay stage.")
+    parser.add_argument("--save-prefix", type=str, default="checkpoint", help="Filename prefix for saved NPZs.")
+    parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bars for speed.")
+    parser.add_argument("--debug", action="store_true", help="Enable assertions & extra checks.")
+    # SLURM array integration
+    parser.add_argument("--array-task-id", type=int, default=None, help="Override SLURM_ARRAY_TASK_ID (0-based).")
+    parser.add_argument("--array-task-count", type=int, default=None, help="Override SLURM_ARRAY_TASK_COUNT.")
     return parser.parse_args()
 
 
 args = parse_args()
 
+# Resolve SLURM array info (environment fallback)
+def _slurm_array_info():
+    tid = args.array_task_id
+    tcount = args.array_task_count
+    # Accept environment variables if args not supplied
+    if tid is None:
+        try:
+            tid = int(os.environ.get("SLURM_ARRAY_TASK_ID", "0"))
+        except Exception:
+            tid = 0
+    if tcount is None:
+        try:
+            tcount = int(os.environ.get("SLURM_ARRAY_TASK_COUNT", "1"))
+        except Exception:
+            tcount = 1
+    return tid, tcount
+
+ARRAY_TASK_ID, ARRAY_TASK_COUNT = _slurm_array_info()
+print(f"[shard] ARRAY_TASK_ID={ARRAY_TASK_ID} ARRAY_TASK_COUNT={ARRAY_TASK_COUNT}")
+
 # Training hyperparameters
 # learning_rate = 0.01        # How fast to learn (higher = faster but less stable)
 lr_bet = 0.01
 lr_play = 0.01
-n_preplay_episodes = args.preplay_episodes
-n_bet_episodes = args.bet_episodes
+n_preplay_episodes_global = args.preplay_episodes
+n_bet_episodes_global = args.bet_episodes
+
+# Shard episodes across array tasks (simple even split; last worker takes remainder)
+def _shard(total: int, idx: int, count: int) -> int:
+    base = total // count
+    rem = total % count
+    return base + (1 if idx < rem else 0)
+
+n_preplay_episodes = _shard(n_preplay_episodes_global, ARRAY_TASK_ID, ARRAY_TASK_COUNT)
+n_bet_episodes = _shard(n_bet_episodes_global, ARRAY_TASK_ID, ARRAY_TASK_COUNT)
+print(f"[shard] preplay episodes shard={n_preplay_episodes} bet episodes shard={n_bet_episodes}")
 total_episodes = n_preplay_episodes + n_bet_episodes
-PLOTS_DIR = _resolve_plots_dir(n_preplay_episodes, n_bet_episodes)
-start_epsilon_play = 1.0         # Start with 100% random actions
-epsilon_decay_play = start_epsilon_play / max(n_preplay_episodes / 2, 1)  # Reduce exploration over time
-final_epsilon_play = 0.1         # Always keep some exploration
-start_epsilon_bet = 1.0         # Start with 100% random actions
-epsilon_decay_bet = start_epsilon_bet / max(n_bet_episodes / 2, 1)  # Reduce exploration over time
-final_epsilon_bet = 0.1         # Always keep some exploration
+PLOTS_DIR = Path(args.output_dir)
+PLOTS_DIR.mkdir(parents=True, exist_ok=True)
+start_epsilon_play = 1.0
+epsilon_decay_play = start_epsilon_play / max(n_preplay_episodes / 2, 1)
+final_epsilon_play = 0.1
+start_epsilon_bet = 1.0
+epsilon_decay_bet = start_epsilon_bet / max(n_bet_episodes / 2, 1)
+final_epsilon_bet = 0.1
 
 # Create environment and agent
 env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True)
 tc_min, tc_max = env.tc_min, env.tc_max
 print(tc_min)
-env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=total_episodes)
+env = gym.wrappers.RecordEpisodeStatistics(env, buffer_length=args.stats_buffer)
 
 agent = BlackjackAgent(
     env=env,
@@ -312,12 +375,17 @@ agent = BlackjackAgent(
     epsilon_decay_play=epsilon_decay_play,
     final_epsilon_bet=final_epsilon_bet,
     final_epsilon_play=final_epsilon_play,
-    discount_factor=1.0
+    discount_factor=1.0,
+    metrics_maxlen=(None if args.metrics_maxlen <= 0 else args.metrics_maxlen),
+    collect_metrics=args.collect_metrics,
+    debug=args.debug,
 )
 
 # %%
 import numpy as np
 from tqdm import tqdm  # Progress bar
+
+tqdm_disable = args.disable_tqdm
 
 n_buckets = env.observation_space.spaces[3].n
 hist_start_play = np.zeros(n_buckets, dtype=np.int64)
@@ -327,7 +395,7 @@ hist_start_bet = np.zeros(n_buckets, dtype=np.int64)
 # We treat SPLIT as a special action: its reward is the total accumulated
 # reward from the split decision until the episode ends.
 base_bet_action = 0 # fixed multiplier 1.0x
-for episode in tqdm(range(n_preplay_episodes), desc="Train Q_play"):
+for episode in tqdm(range(n_preplay_episodes), desc="Train Q_play", disable=tqdm_disable):
     # ----- Phase 0: fixed bet -----
     s0, _ = env.reset()
     tc_idx = s0[3]                     # integer in [0, n_buckets-1]
@@ -377,9 +445,13 @@ for episode in tqdm(range(n_preplay_episodes), desc="Train Q_play"):
 
     agent.decay_epsilon_play()
 
+# Optional checkpoint after Stage 1
+if args.save_stage1:
+    agent.save(PLOTS_DIR / f"{args.save_prefix}_stage1_task{ARRAY_TASK_ID}.npz")
+
 # ----- Stage 2: Learn the betting policy using the trained Q_play ----- #
-for episode in tqdm(range(n_bet_episodes), desc="Train Q_bet"):
-    # ----- Phase 0: choose bet ----- #
+for episode in tqdm(range(n_bet_episodes), desc="Train Q_bet", disable=tqdm_disable):
+    # Phase 0: choose bet
     s0, _ = env.reset()
     tc_idx = s0[3]
     hist_start_bet[tc_idx] += 1
@@ -388,10 +460,7 @@ for episode in tqdm(range(n_bet_episodes), desc="Train Q_bet"):
     assert s1[4] == 1 and not (term or trunc)
     a1 = agent.greedy_play(s1)
 
-    # SARSA update for bet (better results when disabled)
-    # agent.update_bet_sarsa(s0, a_bet, r0, s1, a1)
-
-    # ----- Phase 1: play hand greedily ----- #
+    # Phase 1: play hand greedily
     G = r0
     done = False
     s = s1; a = a1
@@ -401,12 +470,10 @@ for episode in tqdm(range(n_bet_episodes), desc="Train Q_bet"):
         done = terminated or truncated
         if done:
             break
-        # a_next = agent.select_play(s_next)
         a_next = agent.greedy_play(s_next)
         s, a = s_next, a_next
 
     agent.update_bet_mc(s0, a_bet, G)
-
     agent.decay_epsilon_bet()
 
 # Pretty print
@@ -428,56 +495,57 @@ def get_moving_avgs(arr, window, convolution_mode):
         mode=convolution_mode
     ) / window
 
-# Smooth over a 500-episode window
-rolling_length = 500
-fig, axs = plt.subplots(ncols=4, figsize=(12, 5))
+if not args.no_plots and agent.collect_metrics:
+    # Smooth over a 500-episode window
+    rolling_length = 500
+    fig, axs = plt.subplots(ncols=4, figsize=(12, 5))
 
-# Episode rewards (win/loss performance)
-axs[0].set_title("Episode rewards")
-reward_moving_average = get_moving_avgs(
-    env.return_queue,
-    rolling_length,
-    "valid"
-)
-axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
-axs[0].set_ylabel("Average Reward")
-axs[0].set_xlabel("Episode")
+    # Episode rewards (win/loss performance)
+    axs[0].set_title("Episode rewards")
+    reward_moving_average = get_moving_avgs(
+        env.return_queue,
+        rolling_length,
+        "valid"
+    )
+    axs[0].plot(range(len(reward_moving_average)), reward_moving_average)
+    axs[0].set_ylabel("Average Reward")
+    axs[0].set_xlabel("Episode")
 
-# Episode lengths (how many actions per hand)
-axs[1].set_title("Episode lengths")
-length_moving_average = get_moving_avgs(
-    env.length_queue,
-    rolling_length,
-    "valid"
-)
-axs[1].plot(range(len(length_moving_average)), length_moving_average)
-axs[1].set_ylabel("Average Episode Length")
-axs[1].set_xlabel("Episode")
+    # Episode lengths (how many actions per hand)
+    axs[1].set_title("Episode lengths")
+    length_moving_average = get_moving_avgs(
+        env.length_queue,
+        rolling_length,
+        "valid"
+    )
+    axs[1].plot(range(len(length_moving_average)), length_moving_average)
+    axs[1].set_ylabel("Average Episode Length")
+    axs[1].set_xlabel("Episode")
 
-# Training error (how much we're still learning)
-axs[2].set_title("Training Error (Bet)")
-training_error_bet_moving_average = get_moving_avgs(
-    agent.training_error_bet,
-    rolling_length,
-    "same"
-)
-axs[2].plot(range(len(training_error_bet_moving_average)), training_error_bet_moving_average)
-axs[2].set_ylabel("Temporal Difference Error")
-axs[2].set_xlabel("Episode")
+    # Training error (how much we're still learning)
+    axs[2].set_title("Training Error (Bet)")
+    training_error_bet_moving_average = get_moving_avgs(
+        agent.training_error_bet,
+        rolling_length,
+        "same"
+    )
+    axs[2].plot(range(len(training_error_bet_moving_average)), training_error_bet_moving_average)
+    axs[2].set_ylabel("Temporal Difference Error")
+    axs[2].set_xlabel("Episode")
 
-axs[3].set_title("Training Error (Play)")
-training_error_play_moving_average = get_moving_avgs(
-    agent.training_error_play,
-    rolling_length,
-    "same"
-)
-axs[3].plot(range(len(training_error_play_moving_average)), training_error_play_moving_average)
-axs[3].set_ylabel("Temporal Difference Error")
-axs[3].set_xlabel("Step")
+    axs[3].set_title("Training Error (Play)")
+    training_error_play_moving_average = get_moving_avgs(
+        agent.training_error_play,
+        rolling_length,
+        "same"
+    )
+    axs[3].plot(range(len(training_error_play_moving_average)), training_error_play_moving_average)
+    axs[3].set_ylabel("Temporal Difference Error")
+    axs[3].set_xlabel("Step")
 
-plt.tight_layout()
-save_figure(fig, f"{VARIANT_PREFIX}_training_metrics.png")
-plt.close(fig)
+    plt.tight_layout()
+    save_figure(fig, f"{VARIANT_PREFIX}_training_metrics.png")
+    plt.close(fig)
 
 # %%
 def evaluate_bankroll(agent, env, episodes=200_000, rng=None):
@@ -531,8 +599,9 @@ def evaluate_bankroll(agent, env, episodes=200_000, rng=None):
     }
     return summary
 
-results = evaluate_bankroll(agent, env, episodes=500_000)
-print(results)
+if not args.no_plots:
+    results = evaluate_bankroll(agent, env, episodes=args.eval_episodes)
+    print(results)
 
 # %%
 import numpy as np
@@ -617,10 +686,11 @@ def plot_avg_return_by_tc(
     save_figure(fig, filename or f"{VARIANT_PREFIX}_avg_return_by_tc.png")
     plt.close(fig)
 
-labels, mean, ci, counts = eval_avg_return_by_tc(agent, env, episodes=1_000_000)
-for L, m, n in zip(labels, mean, counts):
-    if n: print(f"TC {L}: mean={m: .4f}  n={n}")
-plot_avg_return_by_tc(labels, mean, ci, counts, min_visits=1000)
+if not args.no_plots:
+    labels, mean, ci, counts = eval_avg_return_by_tc(agent, env, episodes=args.eval_tc_episodes)
+    for L, m, n in zip(labels, mean, counts):
+        if n: print(f"TC {L}: mean={m: .4f}  n={n}")
+    plot_avg_return_by_tc(labels, mean, ci, counts, min_visits=1000)
 
 # %%
 # Extract learned bet multiplier per true count (phase 0) and visualize
@@ -664,7 +734,22 @@ for idx in range(n_buckets):
     })
 
 bet_df = pd.DataFrame(rows).sort_values('TC_idx').reset_index(drop=True)
-display(bet_df)
+if not args.no_plots:
+    display(bet_df)
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.bar(bet_df['TC'], bet_df['bet_multiplier'], color='tab:green', edgecolor='k')
+    ax.set_xlabel('True Count')
+    ax.set_ylabel('Greedy Bet Multiplier')
+    ax.set_title('Learned Bet Multiplier by True Count (Phase 0)')
+    ax.grid(axis='y', alpha=0.3)
+    fig.tight_layout()
+    save_figure(fig, f"{VARIANT_PREFIX}_bet_multiplier_by_tc.png")
+    plt.close(fig)
+    # (metrics plotting handled earlier; removed duplicate block)
+
+# Final checkpoint (always save)
+final_ckpt = PLOTS_DIR / f"{args.save_prefix}_final_task{ARRAY_TASK_ID}.npz"
+agent.save(final_ckpt)
 
 # Bar chart of chosen multiplier vs TC (optionally filter low-visit buckets)
 min_visits = 0  # set to e.g. 1000 to hide low-data bins
@@ -672,15 +757,16 @@ plot_df = bet_df
 if 'hist_start' in globals() and min_visits > 0:
     plot_df = bet_df[bet_df['visits_total'].fillna(0) >= min_visits]
 
-fig, ax = plt.subplots(figsize=(12, 4))
-ax.bar(plot_df['TC'], plot_df['bet_multiplier'], color='tab:green', edgecolor='k')
-ax.set_xlabel('True Count')
-ax.set_ylabel('Greedy Bet Multiplier')
-ax.set_title('Learned Bet Multiplier by True Count (Phase 0)')
-ax.grid(axis='y', alpha=0.3)
-fig.tight_layout()
-save_figure(fig, f"{VARIANT_PREFIX}_bet_multiplier_by_tc.png")
-plt.close(fig)
+if not args.no_plots:
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.bar(plot_df['TC'], plot_df['bet_multiplier'], color='tab:green', edgecolor='k')
+    ax.set_xlabel('True Count')
+    ax.set_ylabel('Greedy Bet Multiplier')
+    ax.set_title('Learned Bet Multiplier by True Count (Phase 0)')
+    ax.grid(axis='y', alpha=0.3)
+    fig.tight_layout()
+    save_figure(fig, f"{VARIANT_PREFIX}_bet_multiplier_by_tc.png")
+    plt.close(fig)
 
 # %%
 # === Visualization helpers for Q tables ===
