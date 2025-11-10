@@ -1,0 +1,30 @@
+{
+  "saved_at": "2025-11-09T17:32:43.470899+00:00",
+  "variant": null,
+  "tc_min": -10,
+  "tc_max": 10,
+  "bet_multipliers": [
+    1.0,
+    2.0,
+    4.0
+  ],
+  "natural": true,
+  "sab": false,
+  "Q_play_shape": [
+    32,
+    11,
+    2,
+    21,
+    5
+  ],
+  "Q_bet_shape": [
+    21,
+    3
+  ],
+  "dtype": "float32",
+  "lr_bet": 0.01,
+  "lr_play": 0.01,
+  "discount_factor": 1.0,
+  "epsilon_bet": 0.1,
+  "epsilon_play": 0.1
+}
