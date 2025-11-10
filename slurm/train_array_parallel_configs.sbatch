@@ -1,7 +1,7 @@
 #!/bin/bash
 # Parallelize across both shards and episode configurations by flattening the array.
 # Example: with 3 configs and 8 shards, set --array=0-23 (3*8-1).
-#SBATCH -J sarsa
+#SBATCH -J vary-bet
 #SBATCH -p long
 #SBATCH -t 24:00:00
 #SBATCH --nodes=1
@@ -36,8 +36,8 @@ fi
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
-PREPLAY_EPISODES=(50_000_000 100_000_000 500_000_000)
-BET_EPISODES=(50_000_000 50_000_000 50_000_000)
+PREPLAY_EPISODES=(100_000_000 100_000_000 100_000_000)
+BET_EPISODES=(50_000_000 100_000_000 500_000_000)
 
 if [ ${#PREPLAY_EPISODES[@]} -ne ${#BET_EPISODES[@]} ]; then
   echo "Config error: PREPLAY_EPISODES and BET_EPISODES length mismatch" >&2
@@ -75,5 +75,7 @@ python "${VARIANT_PATH}/sarsa.py" \
   --seed ${SEED} \
   --array-task-id ${SHARD_IDX} \
   --array-task-count ${SHARDS} \
+  --no-plots \
+  --load-qplay "artifacts_merged/add_split/100m_50m/ep_100_000_000_50_000_000_merged.npz"
 
 echo "Done cfg ${CONFIG_IDX} shard ${SHARD_IDX}"
