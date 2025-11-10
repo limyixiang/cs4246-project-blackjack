@@ -59,6 +59,7 @@ class BlackjackAgent:
         final_epsilon_bet: float,
         final_epsilon_play: float,
         discount_factor: float = 0.99,
+        ucb_c: float = 2.0,
         *,
         collect_metrics: bool = False,
         metrics_maxlen: int = 0,
@@ -78,6 +79,7 @@ class BlackjackAgent:
             final_epsilon_bet: Floor exploration rate (bet)
             final_epsilon_play: Floor exploration rate (play)
             discount_factor: SARSA discount (future value weighting)
+            ucb_c: UCB exploration constant for bet sizing (higher explores more)
         """
         base = getattr(env, "unwrapped", env)
         self.env = env
@@ -109,7 +111,7 @@ class BlackjackAgent:
         self.final_epsilon_bet = final_epsilon_bet
         self.final_epsilon_play = final_epsilon_play
         # UCB exploration constant (higher = more exploration bonus)
-        self.ucb_c = 2.0
+        self.ucb_c = float(ucb_c)
 
         # Track learning progress
         self.collect_metrics = bool(collect_metrics)
@@ -161,6 +163,7 @@ class BlackjackAgent:
             'discount_factor': float(self.discount_factor),
             'epsilon_bet': float(self.epsilon_bet),
             'epsilon_play': float(self.epsilon_play),
+            'ucb_c': float(self.ucb_c),
         }
 
         # Robust atomic write on Windows: write to a closed temp file, flush+fsync, then replace
@@ -378,6 +381,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-prefix", type=str, default="checkpoint", help="Filename prefix for saved NPZs.")
     parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bars for speed.")
     parser.add_argument("--debug", action="store_true", help="Enable assertions & extra checks.")
+    parser.add_argument(
+        "--ucb-c",
+        type=float,
+        default=2.0,
+        help="UCB exploration constant for bet sizing (higher explores more).",
+    )
     # Initialization from pre-trained play policy
     parser.add_argument(
         "--load-qplay",
@@ -477,6 +486,7 @@ agent = BlackjackAgent(
     final_epsilon_bet=final_epsilon_bet,
     final_epsilon_play=final_epsilon_play,
     discount_factor=1.0,
+    ucb_c=float(args.ucb_c),
     collect_metrics=bool(args.collect_metrics),
     metrics_maxlen=int(args.metrics_maxlen),
     seed=int(args.seed) + int(ARRAY_TASK_ID),
