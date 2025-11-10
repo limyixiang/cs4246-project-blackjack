@@ -378,6 +378,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-prefix", type=str, default="checkpoint", help="Filename prefix for saved NPZs.")
     parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bars for speed.")
     parser.add_argument("--debug", action="store_true", help="Enable assertions & extra checks.")
+    # Initialization from pre-trained play policy
+    parser.add_argument(
+        "--load-qplay",
+        type=str,
+        default=None,
+        help="Path to NPZ file with a pre-trained Q_play table to initialize from (skips Stage 1 by default).",
+    )
+    parser.add_argument(
+        "--skip-preplay",
+        action="store_true",
+        help="Skip Stage 1 (playing policy training). Useful when using --load-qplay.",
+    )
     # SLURM array integration
     parser.add_argument("--array-task-id", type=int, default=None, help="Override SLURM_ARRAY_TASK_ID (0-based).")
     parser.add_argument("--array-task-count", type=int, default=None, help="Override SLURM_ARRAY_TASK_COUNT.")
@@ -426,6 +438,15 @@ total_episodes = n_preplay_episodes + n_bet_episodes
 PLOTS_DIR = Path(args.output_dir)
 PLOTS_DIR.mkdir(parents=True, exist_ok=True)
 
+# If requested, skip Stage 1 when loading a pre-trained Q_play or if explicitly asked
+if args.load_qplay:
+    print(f"[init] Will load pre-trained Q_play from {args.load_qplay}; disabling Stage 1 preplay training.")
+    n_preplay_episodes = 0
+if args.skip_preplay:
+    if n_preplay_episodes > 0:
+        print("[init] --skip-preplay set; disabling Stage 1 preplay training.")
+    n_preplay_episodes = 0
+
 # Epsilon schedules (based on local episodes for proper decay per task)
 start_epsilon_play = 1.0
 epsilon_decay_play = start_epsilon_play / max(n_preplay_episodes / 2, 1)
@@ -461,6 +482,23 @@ agent = BlackjackAgent(
     seed=int(args.seed) + int(ARRAY_TASK_ID),
     debug=bool(args.debug),
 )
+
+# Optionally initialize Q_play from a merged/pre-trained NPZ
+if args.load_qplay:
+    try:
+        with np.load(args.load_qplay, allow_pickle=False) as z:
+            if 'Q_play' not in z.files:
+                raise KeyError("NPZ missing 'Q_play' array")
+            q_play_loaded = np.asarray(z['Q_play'], dtype=np.float32)
+        if tuple(q_play_loaded.shape) != tuple(agent.Q_play.shape):
+            raise ValueError(
+                f"Loaded Q_play shape {q_play_loaded.shape} does not match agent.Q_play shape {agent.Q_play.shape}. "
+                "Ensure the environment config (e.g., TC buckets, actions) matches the merged model."
+            )
+        agent.Q_play[...] = q_play_loaded
+        print(f"[init] Loaded Q_play from {args.load_qplay} with shape {q_play_loaded.shape}.")
+    except Exception as e:
+        raise SystemExit(f"Failed to load Q_play from {args.load_qplay}: {e}")
 
 # %%
 import numpy as np
