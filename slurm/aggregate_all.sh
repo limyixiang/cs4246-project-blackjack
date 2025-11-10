@@ -68,18 +68,29 @@ for entry in "${CFGS[@]}"; do
     display_cfg="$cfg"
   fi
 
-  # Try to parse pre/bet from cfg name: expect ep_<pre>_<bet> where numbers use underscores as thousand separators
+  # Derive human-friendly subdir from cfg name: ep_<pre>_<bet>
+  # Previous regex approach was greedy and mis-split cases like ep_100_000_000_100_000_000.
+  # Strategy: strip 'ep_' then split underscore groups evenly into two numbers.
   human_subdir=""
-  if [[ "$cfg" =~ ^ep_([0-9]{1,3}(_[0-9]{3})+)_([0-9]{1,3}(_[0-9]{3})+)$ ]]; then
-    pre_raw="${BASH_REMATCH[1]}"
-    bet_raw="${BASH_REMATCH[3]}"
-    pre_human=$(format_human "$pre_raw")
-    bet_human=$(format_human "$bet_raw")
-    human_subdir="${pre_human}_${bet_human}"
-    outdir="$base_outdir/$human_subdir"
+  rest="${cfg#ep_}"
+  IFS='_' read -r -a parts <<< "$rest"
+  if (( ${#parts[@]} >= 2 )) && (( ${#parts[@]} % 2 == 0 )); then
+    half=$(( ${#parts[@]} / 2 ))
+    pre_raw="$(printf "%s_" "${parts[@]:0:half}")"
+    pre_raw="${pre_raw%_}"
+    bet_raw="$(printf "%s_" "${parts[@]:half}")"
+    bet_raw="${bet_raw%_}"
+    # Validate numeric (after removing underscores) to guard against unexpected patterns
+    if [[ "${pre_raw//_/}" =~ ^[0-9]+$ ]] && [[ "${bet_raw//_/}" =~ ^[0-9]+$ ]]; then
+      pre_human=$(format_human "$pre_raw")
+      bet_human=$(format_human "$bet_raw")
+      human_subdir="${pre_human}_${bet_human}"
+      outdir="$base_outdir/$human_subdir"
+    else
+      outdir="$base_outdir"  # fallback
+    fi
   else
-    # Fallback: no human-friendly layer
-    outdir="$base_outdir"
+    outdir="$base_outdir"  # fallback when uneven groups
   fi
   mkdir -p "$outdir"
   out="$outdir/${cfg}_merged.npz"
