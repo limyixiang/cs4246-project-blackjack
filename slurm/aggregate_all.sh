@@ -12,6 +12,27 @@ mkdir -p "$OUTROOT"
 
 shopt -s nullglob
 
+# Format a numeric string with underscores (e.g., 50_000_000) to a compact label (e.g., 50m)
+format_human() {
+  local s="$1"
+  # strip underscores
+  local n="${s//_/}"
+  # guard non-numeric
+  if ! [[ "$n" =~ ^[0-9]+$ ]]; then
+    echo "$s"
+    return
+  fi
+  # use bash arithmetic (supports 64-bit)
+  local v=$((10#$n))
+  if (( v % 1000000 == 0 )); then
+    echo "$(( v / 1000000 ))m"
+  elif (( v % 1000 == 0 )); then
+    echo "$(( v / 1000 ))k"
+  else
+    echo "$v"
+  fi
+}
+
 # Build unique list of (variant|cfg) pairs where variant may be empty for flat layout
 mapfile -t CFGS < <(
   for dir in "$ROOT"/ep_* "$ROOT"/*/ep_*; do
@@ -36,17 +57,32 @@ for entry in "${CFGS[@]}"; do
   variant="${entry%%|*}"
   cfg="${entry#*|}"
 
+  # Determine input pattern and output directory (with optional human-friendly subfolder like 50m_50m)
   if [ -n "$variant" ]; then
     pattern="$ROOT/$variant/${cfg}_task*/checkpoint_final_task*.npz"
-    outdir="$OUTROOT/$variant"
-    mkdir -p "$outdir"
-    out="$outdir/${cfg}_merged.npz"
+    base_outdir="$OUTROOT/$variant"
     display_cfg="$variant/$cfg"
   else
     pattern="$ROOT/${cfg}_task*/checkpoint_final_task*.npz"
-    out="$OUTROOT/${cfg}_merged.npz"
+    base_outdir="$OUTROOT"
     display_cfg="$cfg"
   fi
+
+  # Try to parse pre/bet from cfg name: expect ep_<pre>_<bet> where numbers use underscores as thousand separators
+  human_subdir=""
+  if [[ "$cfg" =~ ^ep_([0-9]{1,3}(_[0-9]{3})+)_([0-9]{1,3}(_[0-9]{3})+)$ ]]; then
+    pre_raw="${BASH_REMATCH[1]}"
+    bet_raw="${BASH_REMATCH[3]}"
+    pre_human=$(format_human "$pre_raw")
+    bet_human=$(format_human "$bet_raw")
+    human_subdir="${pre_human}_${bet_human}"
+    outdir="$base_outdir/$human_subdir"
+  else
+    # Fallback: no human-friendly layer
+    outdir="$base_outdir"
+  fi
+  mkdir -p "$outdir"
+  out="$outdir/${cfg}_merged.npz"
 
   # Expand pattern to a list; skip if no inputs found
   inputs=( $pattern )
@@ -86,7 +122,8 @@ for entry in "${CFGS[@]}"; do
         newest_meta="$mf"
       fi
     done
-    meta_out="${out%.npz}_meta.json"
+    # Preferred naming: place meta as "${cfg}.meta.json" in the same output dir
+    meta_out="$outdir/${cfg}.meta.json"
     # Copy only if destination is missing or older than source
     if [ ! -f "$meta_out" ] || [ "$newest_meta" -nt "$meta_out" ]; then
       cp "$newest_meta" "$meta_out"

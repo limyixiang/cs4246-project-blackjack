@@ -52,6 +52,8 @@ class LoadedAgent:
         m = np.max(q_masked); idxs = np.flatnonzero(q_masked == m)
         return int(self.rng.choice(idxs))
     
+
+
 def evaluate_bankroll(agent, env, episodes=200_000, rng=None):
     """Evaluate the trained agent.
 
