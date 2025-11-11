@@ -297,7 +297,7 @@ class BlackjackAgent:
         tc0 = int(s0[3])
         qsa = self.Q_bet[tc0, a_bet]
         td = G - qsa
-        self.Q_bet[tc0, a_bet] += self.lr_bet * td
+        self.Q_bet[tc0, a_bet] += td / self.N_bet[tc0, a_bet]
         if self.collect_metrics:
             self.training_error_bet.append(float(td))
 
