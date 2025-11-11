@@ -210,6 +210,8 @@ class BlackjackEnv(gym.Env):
             self.update_hi_lo_count(self.player.active_hand[0])
             self.update_hi_lo_count(self.player.active_hand[1])
             self.update_hi_lo_count(self.dealer[0])
+            if self.full_info:
+                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
 
             self.phase = 1
             assert self.observation_space.contains(self._get_obs())
@@ -219,7 +221,8 @@ class BlackjackEnv(gym.Env):
         # ----- Phase 1: playing phase -----
         # Auto win on first hand if natural hand
         if len(self.player.hands) == 1 and self.player.active_hand.is_natural():
-            self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+            if not self.full_info:
+                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
             terminated = True
             if self.dealer.is_natural(): # push since both have naturals
                 reward = 0.0
@@ -258,11 +261,10 @@ class BlackjackEnv(gym.Env):
             terminated = True
             # if dealer has blackjack: lose full bet
             if self.dealer.is_natural():
-                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+                if not self.full_info:
+                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 reward = -1.0 * self.player.active_bet
             else: # dealer does not reveal his unseen card
-                if self.full_info:
-                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 reward = -0.5 * self.player.active_bet
         elif action == PlayActions.DOUBLE: # Double down (assume only 1 player and 1 dealer)
             self.player.apply_double_down() # doubles the bet for the active hand
@@ -307,13 +309,11 @@ class BlackjackEnv(gym.Env):
         if terminated and action != PlayActions.SURRENDER:
             # if player busted all his hands, dealer's hole card is not revealed in typical rules
             if all(hand.is_bust() for hand in self.player.hands):
-                if self.full_info:
-                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
-                else:
-                    pass
+                pass
             else:
                 other_hand_rewards = 0.0
-                self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+                if not self.full_info:
+                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 while self._dealer_should_hit():
                     drawn_card = self.deck.draw_card()
                     self.update_hi_lo_count(drawn_card)
