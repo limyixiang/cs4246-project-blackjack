@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cluster-friendly SARSA trainer for the Hi-Lo add_double variant.
+"""Cluster-friendly SARSA trainer for the Hi-Lo add_surrender variant.
 
 Enhancements vs notebook export:
 - SLURM-aware sharding across array tasks (episodes split per task)
