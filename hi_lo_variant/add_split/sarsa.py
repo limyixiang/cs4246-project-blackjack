@@ -387,6 +387,12 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
         help="UCB exploration constant for bet sizing (higher explores more).",
     )
+    parser.add_argument(
+        "--cut-frac",
+        type=float,
+        default=0.25,
+        help="Fraction of shoe remaining at which to cut/shuffle",
+    )
     # Initialization from pre-trained play policy
     parser.add_argument(
         "--load-qplay",
@@ -465,7 +471,7 @@ epsilon_decay_bet = start_epsilon_bet / max(n_bet_episodes / 2, 1)
 final_epsilon_bet = 0.1
 
 # Create environment and agent
-env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True)
+env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True, cut_frac=float(args.cut_frac))
 if hasattr(env, 'seed'):
     try:
         env.seed(args.seed + ARRAY_TASK_ID)

@@ -108,13 +108,14 @@ class BlackjackEnv(gym.Env):
     - The overlapping integer encoding of actions between phases is intentional; the environment determines legal actions based on `phase`.
     - Training convenience: use `cumulative_episode_reward()` to read back the sum of incremental rewards for the episode.
     """
-    def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10):
+    def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10, cut_frac: float = 0.25):
         self.num_decks = num_decks
         # Dynamic true-count bucket configuration: integer buckets from tc_min..tc_max (inclusive)
         self.tc_min, self.tc_max = int(tc_min), int(tc_max)
         assert self.tc_max >= self.tc_min, "tc_max must be >= tc_min"
         # Pretty labels
         self.tc_bucket_names = tuple(f"{v:+d}" for v in range(self.tc_min, self.tc_max + 1))
+        self.cut_frac = cut_frac # reshuffle when {self.cut_frac} deck remains
         self.bet_multipliers = np.array([1.0, 2.0, 4.0], dtype=np.float32)
         self.n_bets = len(self.bet_multipliers)
         # To cover all actions and all bet multipliers
@@ -342,9 +343,8 @@ class BlackjackEnv(gym.Env):
         options: dict | None = None,
     ):
         super().reset(seed=seed)
-        cut_frac = 0.25  # reshuffle when 25% of deck remains
         # Reshuffle when low on cards
-        if self.deck.size() < int(52 * self.num_decks * cut_frac):
+        if self.deck.size() < int(52 * self.num_decks * self.cut_frac):
             self.deck = Deck(self.num_decks)
             self.deck.shuffle()
             self.hi_lo_count = 0  # reset count
