@@ -381,6 +381,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--save-prefix", type=str, default="checkpoint", help="Filename prefix for saved NPZs.")
     parser.add_argument("--disable-tqdm", action="store_true", help="Disable tqdm progress bars for speed.")
     parser.add_argument("--debug", action="store_true", help="Enable assertions & extra checks.")
+    parser.add_argument("--full-info", action="store_true", help="Environment reveals dealer hole card info even on player busts/surrenders.")
     parser.add_argument(
         "--ucb-c",
         type=float,
@@ -471,7 +472,7 @@ epsilon_decay_bet = start_epsilon_bet / max(n_bet_episodes / 2, 1)
 final_epsilon_bet = 0.1
 
 # Create environment and agent
-env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True, cut_frac=float(args.cut_frac))
+env = BlackjackEnv(num_decks=4, tc_min=-10, tc_max=10, natural=True, cut_frac=float(args.cut_frac), full_info=bool(args.full_info))
 if hasattr(env, 'seed'):
     try:
         env.seed(args.seed + ARRAY_TASK_ID)

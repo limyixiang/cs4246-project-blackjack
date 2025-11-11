@@ -108,7 +108,7 @@ class BlackjackEnv(gym.Env):
     - The overlapping integer encoding of actions between phases is intentional; the environment determines legal actions based on `phase`.
     - Training convenience: use `cumulative_episode_reward()` to read back the sum of incremental rewards for the episode.
     """
-    def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10, cut_frac: float = 0.25):
+    def __init__(self, natural = False, sab = False, num_decks: int = 1, tc_min: int = -10, tc_max: int = 10, cut_frac: float = 0.25, full_info: bool = False):
         self.num_decks = num_decks
         # Dynamic true-count bucket configuration: integer buckets from tc_min..tc_max (inclusive)
         self.tc_min, self.tc_max = int(tc_min), int(tc_max)
@@ -116,6 +116,7 @@ class BlackjackEnv(gym.Env):
         # Pretty labels
         self.tc_bucket_names = tuple(f"{v:+d}" for v in range(self.tc_min, self.tc_max + 1))
         self.cut_frac = cut_frac # reshuffle when {self.cut_frac} deck remains
+        self.full_info = full_info
         self.bet_multipliers = np.array([1.0, 2.0, 4.0], dtype=np.float32)
         self.n_bets = len(self.bet_multipliers)
         # To cover all actions and all bet multipliers
@@ -260,6 +261,8 @@ class BlackjackEnv(gym.Env):
                 self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 reward = -1.0 * self.player.active_bet
             else: # dealer does not reveal his unseen card
+                if self.full_info:
+                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
                 reward = -0.5 * self.player.active_bet
         elif action == PlayActions.DOUBLE: # Double down (assume only 1 player and 1 dealer)
             self.player.apply_double_down() # doubles the bet for the active hand
@@ -304,7 +307,10 @@ class BlackjackEnv(gym.Env):
         if terminated and action != PlayActions.SURRENDER:
             # if player busted all his hands, dealer's hole card is not revealed in typical rules
             if all(hand.is_bust() for hand in self.player.hands):
-                pass
+                if self.full_info:
+                    self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
+                else:
+                    pass
             else:
                 other_hand_rewards = 0.0
                 self.update_hi_lo_count(self.dealer[1]) # update hi-lo count for dealer's 2nd (unseen) card
