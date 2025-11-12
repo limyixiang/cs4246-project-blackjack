@@ -1,5 +1,5 @@
 {
-  "saved_at": "2025-11-12T03:21:56.371281+00:00",
+  "saved_at": "2025-11-12T05:32:25.131408+00:00",
   "variant": null,
   "tc_min": -10,
   "tc_max": 10,
@@ -15,7 +15,7 @@
     11,
     2,
     21,
-    2
+    5
   ],
   "Q_bet_shape": [
     21,
@@ -26,5 +26,6 @@
   "lr_play": 0.01,
   "discount_factor": 1.0,
   "epsilon_bet": 0.1,
-  "epsilon_play": 0.1
+  "epsilon_play": 1.0,
+  "ucb_c": 2.0
 }
