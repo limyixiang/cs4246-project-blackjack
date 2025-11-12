@@ -36,7 +36,7 @@ fi
 SEED_BASE=12345
 
 # Define episode configurations (must be same length)
-PREPLAY_EPISODES=(100_000_000)
+PREPLAY_EPISODES=(200_000_000)
 BET_EPISODES=(200_000_000)
 
 if [ ${#PREPLAY_EPISODES[@]} -ne ${#BET_EPISODES[@]} ]; then
@@ -77,7 +77,7 @@ python "${VARIANT_PATH}/sarsa.py" \
   --array-task-id ${SHARD_IDX} \
   --array-task-count ${SHARDS} \
   --no-plots \
-  --load-qplay "artifacts_merged/full_info/100m_100m/ep_100_000_000_100_000_000_merged.npz" \
   --full-info
+  # --load-qplay "artifacts_merged/full_info/100m_100m/ep_100_000_000_100_000_000_merged.npz" \
 
 echo "Done cfg ${CONFIG_IDX} shard ${SHARD_IDX}"
