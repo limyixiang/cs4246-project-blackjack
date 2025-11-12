@@ -4,7 +4,11 @@ from gymnasium import spaces
 from gymnasium.error import DependencyNotInstalled
 import numpy as np
 
-from deck import Deck
+# Support both running as a script from this folder and importing as a package
+try:
+    from deck import Deck
+except ImportError:  # pragma: no cover - fallback for package import
+    from .deck import Deck
 
 ACE_RANKS = {"A"} 
 TEN_VALUE_RANKS = {"10", "J", "Q", "K"}  # ranks worth 10
