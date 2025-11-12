@@ -909,9 +909,19 @@ def plot_q_play(
             A = np.argmax(Q[:, :, u, :], axis=-1)  # (psum, dealer)
             Mraw = A[4:22, dealer_slice]          # player sums 4..21, dealer Ace,2..10
             M = _reorder(Mraw)
-            im = ax.imshow(M, aspect='auto', cmap='tab10', vmin=0, vmax=2)
-            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04, ticks=[0, 1, 2])
-            cbar.ax.set_yticklabels(['Stand', 'Hit'])
+            # Policy argmax only yields integer action ids actually present (currently 0=Stand,1=Hit).
+            # Previous code set ticks [0,1,2] with only 2 labels, causing a mismatch ValueError.
+            # Make this robust to future additional actions by deriving ticks dynamically.
+            n_actions = Q.shape[-1]
+            im = ax.imshow(M, aspect='auto', cmap='tab10', vmin=0, vmax=max(n_actions - 1, 1))
+            cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            ticks = list(range(n_actions))
+            cbar.set_ticks(ticks)
+            # Provide default labels; if exactly 2 actions use friendly names.
+            if n_actions == 2:
+                cbar.set_ticklabels(['Stand', 'Hit'])
+            else:
+                cbar.set_ticklabels([str(t) for t in ticks])
         else:
             if show == 'delta':
                 Mfull = Q[:, :, u, 1] - Q[:, :, u, 0]
